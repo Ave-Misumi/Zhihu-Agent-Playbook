@@ -1,0 +1,4 @@
+browser-use[core]
+langchain-openai
+langchain-community
+playwright

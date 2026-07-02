@@ -1,0 +1,20 @@
+# 虚拟环境
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# 运行时生成
+memory/zhihu_playbook.json
+
+# 敏感配置
+.env
