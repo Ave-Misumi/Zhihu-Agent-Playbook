@@ -187,17 +187,7 @@ ChatBrowserUse         # browser-use 内置 LLM 封装（OpenAI 兼容）
 
 ## 设计决策
 
-**为什么不写死 Selenium/RPA 脚本？**
-- 知乎页面频繁改版，固定 XPath 几天就失效
-- 传统 RPA 每次都要重新定位元素，浪费 LLM Token
-
 **Playbook 方案的收益：**
 - 首次慢（30s DOM 探索 + LLM 分析），后续快（<50ms Playwright 直连）
 - 选择器自动沉淀到 JSON，无需手动维护
 - 页面改版后自动降级为 DOM 探索并更新手册
-
----
-
-## License
-
-MIT
