@@ -1,6 +1,6 @@
 # Zhihu-Agent-Playbook
 
-基于 browser-use + LangChain + Playwright 的知乎自动化 Agent，核心设计理念是**操作手册（Playbook）先验知识库**——首次 DOM 探索后缓存选择器，后续毫秒级执行，拒绝重复造轮子。
+基于 browser-use + LangChain + Playwright 的知乎自动化 Agent，核心设计理念是**操作手册（Playbook）先验知识库**——首次 DOM 探索后缓存选择器，后续毫秒级执行。
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![browser-use](https://img.shields.io/badge/browser--use-0.13.3-green.svg)](https://github.com/browser-use/browser-use)
