@@ -15,8 +15,6 @@
 - **首次执行**：Agent 探索 DOM → 找到元素 → 写入 `zhihu_playbook.json`
 - **后续执行**：查手册 → 直接 Playwright → 毫秒级响应
 
-速度提升 **100 倍以上**，且无需人工维护选择器。
-
 ---
 
 ## 项目结构
@@ -25,6 +23,8 @@
 Zhihu-Agent-Playbook/
 ├── main.py                    # 入口：解析参数、启动 Agent
 ├── config.py                  # 配置：LLM API / 浏览器
+├── .env                       # 环境变量（API Key 等，不提交）
+├── .env.example               # 环境变量配置示例
 ├── requirements.txt           # Python 依赖
 ├── agent/
 │   └── core.py                # Agent 组装：注册工具、注入策略
@@ -40,13 +40,13 @@ Zhihu-Agent-Playbook/
 
 ## 核心工具
 
-| 工具 | 作用 | 调用时机 |
-|------|------|----------|
-| `get_playbook_selector` | 查询手册，返回已缓存的 CSS 选择器 | 每次操作前 |
-| `save_to_playbook` | DOM 探索成功后写入手册 | 首次命中元素后 |
-| `execute_playwright_action` | 直接 Playwright 点击/输入 | 手册命中时 |
-| `generate_and_insert_svg_image` | 生成 SVG 配图并注入编辑器 | 写文章时 |
-| `ask_human_for_intervention` | 暂停等待人工处理 | 验证码/扫码时 |
+| 工具 | 作用 |
+|------|------|
+| `get_playbook_selector` | 查询手册，返回已缓存的 CSS 选择器 |
+| `save_to_playbook` | DOM 探索成功后写入手册 |
+| `execute_playwright_action` | 直接 Playwright 点击/输入 |
+| `generate_and_insert_svg_image` | 生成 SVG 配图并注入编辑器 |
+| `ask_human_for_intervention` | 暂停等待人工处理验证码/扫码 |
 
 ---
 
@@ -63,7 +63,7 @@ cd Zhihu-Agent-Playbook
 
 ```bash
 python -m venv venv
-venv\Scripts\activate     # Windows
+.\venv\Scripts\activate     # Windows
 # source venv/bin/activate  # macOS/Linux
 ```
 
@@ -71,28 +71,33 @@ venv\Scripts\activate     # Windows
 
 ```bash
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-playwright install chromium
 ```
 
-### 4. 配置 API Key
+### 4. 配置环境变量
+
+复制配置示例文件并填入真实信息：
 
 ```bash
-# Windows PowerShell
-$env:LLM_API_KEY = "sk-your-api-key-here"
-
-# 或编辑 config.py 中的 LLM_API_KEY
+copy .env.example .env
 ```
 
-支持任意 OpenAI 兼容接口：
+编辑 `.env`，填入 LLM API 信息：
 
-| 提供商 | Base URL | 模型 |
-|--------|----------|------|
-| SiliconFlow | `https://api.siliconflow.cn` | `Qwen/Qwen2.5-72B-Instruct` |
-| 阿里云百炼 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| Ollama 本地 | `http://localhost:11434/v1` | `hermes3` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+```env
+LLM_BASE_URL=https://your-api-endpoint.com/v1
+LLM_API_KEY=sk-your-api-key-here
+LLM_MODEL=your-model-name
+```
 
-### 5. 运行
+支持的 LLM 类型：任意 OpenAI 兼容接口（如阿里云百炼、SiliconFlow、Ollama 本地、OpenAI 等）。
+
+### 5. 配置浏览器
+
+本项目默认使用**本机 Microsoft Edge**，复用已登录状态，无需重复扫码。
+
+浏览器默认路径已配置好，通常无需修改。
+
+### 6. 运行
 
 ```bash
 # 自定义任务
@@ -106,17 +111,13 @@ python main.py
 
 ## 配置说明
 
-`config.py` 支持环境变量覆盖：
+所有配置通过 `.env` 文件管理：
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `LLM_BASE_URL` | `https://api.siliconflow.cn` | LLM API 地址 |
-| `LLM_API_KEY` | `your-api-key-here` | API 密钥 |
-| `LLM_MODEL` | `Qwen/Qwen2.5-72B-Instruct` | 模型名称 |
-
-浏览器配置：
-- `USE_BUILTIN_CHROMIUM = True` → Playwright 内置 Chromium（推荐）
-- `USE_BUILTIN_CHROMIUM = False` → 本机 Edge（可复用登录态）
+| 变量 | 说明 |
+|------|------|
+| `LLM_BASE_URL` | LLM API 端点（OpenAI 兼容） |
+| `LLM_API_KEY` | API 密钥 |
+| `LLM_MODEL` | 模型名称 |
 
 ---
 
@@ -125,7 +126,7 @@ python main.py
 - **browser-use 0.13.3** — Agent 框架
 - **Playwright 1.61.0** — 浏览器自动化
 - **LangChain** — LLM 编排
-- **ChatBrowserUse** — OpenAI 兼容 LLM 封装
+- **本机 Microsoft Edge** — 浏览器
 
 ---
 

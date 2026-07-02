@@ -2,16 +2,62 @@ import os
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 # ==========================================
-# LLM 接入配置
+# 加载 .env 文件（如果存在）
 # ==========================================
-# 使用 langchain_openai.ChatOpenAI 对接任意 OpenAI 兼容 API
-# 通过 BridgeLLM 包装类适配 browser-use Agent 的接口要求
+def _load_env_file():
+    """从项目根目录的 .env 文件加载环境变量"""
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    # 只在未设置时才写入，命令行传入的优先
+                    if key not in os.environ:
+                        os.environ[key] = value
 
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://llm-jsxrc5fxazos0p33.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "sk-ws-H.RXLLEMY.ggdo.MEUCIQDRk0rUxl-CHddlOPlMpBsiwVfDrtXdnzadGNiiSMeLsQIgSFbbuso7rboEjrkKLNcPgVHvn4PdkwDsTq3Gj6VJ_3w")
-LLM_MODEL = os.getenv("LLM_MODEL", "glm-5.1")
+_load_env_file()
+
+
+# ==========================================
+# LLM 接入配置（从环境变量读取，无默认值）
+# ==========================================
+# 使用方式：
+#   1. 设置系统环境变量：export LLM_API_KEY=sk-xxx
+#   2. 或在项目根目录创建 .env 文件（见 .env.example）
+#   3. 或在运行前设置：$env:LLM_API_KEY="sk-xxx"
+
+LLM_BASE_URL = os.getenv("LLM_BASE_URL")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL")
+
+
+def _validate_config():
+    """验证必需的配置项是否已设置"""
+    missing = []
+    if not LLM_BASE_URL:
+        missing.append("LLM_BASE_URL")
+    if not LLM_API_KEY:
+        missing.append("LLM_API_KEY")
+    if not LLM_MODEL:
+        missing.append("LLM_MODEL")
+    
+    if missing:
+        raise RuntimeError(
+            f"\n缺少必需的配置项: {', '.join(missing)}\n\n"
+            f"请通过以下方式之一设置:\n"
+            f"  1. 系统环境变量: export LLM_API_KEY=sk-xxx\n"
+            f"  2. .env 文件: 在项目根目录创建 .env 文件（参考 .env.example）\n"
+            f"  3. PowerShell: $env:LLM_API_KEY='sk-xxx'\n"
+        )
 
 
 @dataclass
@@ -128,7 +174,11 @@ class BridgeLLM:
 
 
 def get_llm():
+    """创建并返回配置好的 LLM 实例"""
     from langchain_openai import ChatOpenAI
+    
+    # 运行时验证配置（导入时不验证，允许预加载模块）
+    _validate_config()
 
     inner = ChatOpenAI(
         model=LLM_MODEL,
@@ -141,9 +191,10 @@ def get_llm():
 
 
 # ==========================================
-# Playwright 内置 Chromium 浏览器配置（推荐）
-# 不使用本机 Edge，避免 user data 冲突
+# 浏览器配置（使用本机 Edge）
 # ==========================================
-EDGE_EXECUTABLE_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-EDGE_USER_DATA_DIR = None
-USE_BUILTIN_CHROMIUM = True
+EDGE_EXECUTABLE_PATH = os.getenv(
+    "EDGE_EXECUTABLE_PATH",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+)
+EDGE_USER_DATA_DIR = os.getenv("EDGE_USER_DATA_DIR", "") or None

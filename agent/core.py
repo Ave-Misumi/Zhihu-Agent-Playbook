@@ -3,7 +3,7 @@ from browser_use.browser.session import BrowserSession
 from browser_use.browser.profile import BrowserProfile
 from browser_use.tools.service import Tools
 
-from config import get_llm, USE_BUILTIN_CHROMIUM, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR
+from config import get_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR
 from tools.playbook import get_playbook_selector, save_to_playbook, execute_playwright_action
 from tools.image_gen import generate_and_insert_svg_image
 from tools.human_in_loop import ask_human_for_intervention
@@ -39,18 +39,12 @@ def create_custom_tools() -> Tools:
 async def create_zhihu_agent(task: str):
     custom_tools = create_custom_tools()
 
-    # 选择浏览器：内置 Chromium（推荐）或本机 Edge
-    if USE_BUILTIN_CHROMIUM:
-        browser_profile = BrowserProfile(
-            headless=False,  # 必须可见，方便观察和处理验证码
-        )
-    else:
-        browser_profile = BrowserProfile(
-            executable_path=EDGE_EXECUTABLE_PATH,
-            user_data_dir=EDGE_USER_DATA_DIR,
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
+    browser_profile = BrowserProfile(
+        executable_path=EDGE_EXECUTABLE_PATH,
+        user_data_dir=EDGE_USER_DATA_DIR,
+        headless=False,
+        args=["--disable-blink-features=AutomationControlled"]
+    )
 
     browser_session = BrowserSession(browser_profile=browser_profile)
 
