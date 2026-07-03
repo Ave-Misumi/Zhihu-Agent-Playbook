@@ -1,6 +1,7 @@
 import os
 import json
 import re
+from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -286,9 +287,8 @@ class BridgeLLM:
 
             # 特殊处理
             if func_name == "wait":
-                # wait 只需要秒数
                 seconds = params.get("time") or params.get("seconds") or 3
-                actions.append({"wait": int(seconds)})
+                actions.append({"wait": {"seconds": int(seconds)}})
             elif func_name == "navigate" and "url" in params:
                 actions.append({"navigate": {"url": params["url"]}})
             elif func_name == "click" and "index" in params:
@@ -384,6 +384,39 @@ class BridgeLLM:
         if text.strip().startswith("{"):
             return BridgeLLM._auto_close_json(text.strip())
         return text.strip()
+
+    @staticmethod
+    def _pre_repair_json(text: str) -> str:
+        """预修复 GLM-5.1 独有的 JSON 语法错误（json_repair 也修不了的）
+        
+        已知变体：
+        - {"write_file","file_name":"x"}  → 逗号当冒号+少了{，修复为 {"write_file":{"file_name":"x"}}
+        - {"click","index":370}  → 同上
+        - {"navigate","url":"https://..."}  → 同上
+        - {"switch","tab_index":0}  → 同上
+        """
+        # 模式: {"action_name","param_key":value}  — 即第二个条目是 "xxx": 而非 "xxx",
+        # 且第一个条目以 ", 结束（而非 ": 开始）
+        # 修复: 将 {"act","k":v -> {"act":{"k":v}
+        import re
+        
+        def fix_flat_action(match):
+            action_name = match.group(1)
+            params_raw = match.group(2)
+            # 闭合这个嵌套对象
+            return '{"' + action_name + '":{' + params_raw + '}}'
+        
+        # 匹配: {"key","param" 模式 — action 名为 key，后面跟逗号而非冒号+{，再跟参数字符串键
+        # 特征: {" 后面跟 action_name，然后 "," 而非 ":"
+        pattern = r'\{"([a-z_]+)",("[a-z_]+":[^}]+)\}(?!\})'
+        text = re.sub(pattern, fix_flat_action, text)
+        
+        # 第二遍：更宽松的模式 — key 后面是逗号且下一个是字符串 key
+        # {"switch","tab_index":0} → {"switch":{"tab_index":0}}
+        pattern2 = r'\{"([a-z_]+)",("[a-z_]+":[^,}]+(?:,[^}]+)?)\}'
+        text = re.sub(pattern2, fix_flat_action, text)
+        
+        return text
 
     @staticmethod
     def _auto_close_json(candidate: str) -> str:
@@ -487,6 +520,80 @@ class BridgeLLM:
         return c
 
     @staticmethod
+    def _pre_repair_json(text: str) -> str:
+        """预修复 GLM-5.1 奇葩 JSON 语法
+
+        GLM-5.1 会把 "write_file":{...} 写成 "write_file",...
+        即用逗号代替冒号+花括号。
+
+        策略: 逐字符扫描，检测到 { followed by "action_name", 时插入 :{
+        然后在匹配的外层 } 前补一个 }。
+        """
+        _TOOL_SET = {
+            'navigate', 'click', 'input', 'done', 'search', 'extract', 'scroll',
+            'send_keys', 'find_elements', 'find_text', 'switch', 'close', 'go_back',
+            'wait', 'upload_file', 'search_page', 'save_as_pdf', 'dropdown_options',
+            'select_dropdown', 'write_file', 'replace_file', 'read_file', 'evaluate',
+            'screenshot', 'get_playbook_selector', 'save_to_playbook',
+            'execute_playwright_action', 'generate_and_insert_svg_image',
+            'ask_human_for_intervention'
+        }
+
+        result = []
+        i = 0
+        n = len(text)
+        # 记录注入位置: (原始index_offset, 需插入的 } 的位置偏移)
+        pending_close_positions = []  # stack of (original_pos_of_matching_})
+
+        while i < n:
+            ch = text[i]
+            if ch == '{':
+                result.append(ch)
+                i += 1
+                # 跳过空白
+                while i < n and text[i] in ' \t\n\r':
+                    result.append(text[i])
+                    i += 1
+                # 尝试匹配 "tool_name",
+                if i < n and text[i] == '"':
+                    j = i + 1
+                    while j < n and text[j] != '"':
+                        j += 1
+                    if j < n:
+                        tool_name = text[i+1:j]
+                        after_quote = text[j+1:j+2] if j+1 < n else ''
+                        # 检测："tool_name" 后是逗号(没有冒号)
+                        rest_idx = j + 1
+                        while rest_idx < n and text[rest_idx] in ' \t\n\r':
+                            rest_idx += 1
+                        if rest_idx < n and text[rest_idx] == ',' and tool_name in _TOOL_SET:
+                            # 这是 GLM 奇葩格式！补 : {
+                            result.append(text[i:j+1])  # "tool_name"
+                            result.append(':{')
+                            i = rest_idx + 1  # 跳过逗号
+                            continue
+                # 正常 { ，不特殊处理
+                continue
+            elif ch == '}':
+                # 这是原来闭合外层 { 的 }
+                # 检查后面是否紧接 ,{ 或 ]
+                rest = text[i+1:].lstrip()
+                if rest.startswith(',{') or rest.startswith(']'):
+                    # 需要在这个 } 前插入一个 } （用于闭合注入的 inner {）
+                    result.append('}')  # inner }
+                    result.append('}')  # outer }
+                    i += 1
+                    continue
+                result.append(ch)
+                i += 1
+                continue
+            else:
+                result.append(ch)
+                i += 1
+
+        return ''.join(result)
+
+    @staticmethod
     def _sanitize_actions(data: dict) -> dict:
         """清理 LLM 输出的 action 数组中的常见格式错误
 
@@ -534,13 +641,8 @@ class BridgeLLM:
             if not act:
                 continue
 
-            # 3) {"wait": {"time": N}} / {"wait": {"seconds": N}} → {"wait": N}
-            if "wait" in act and isinstance(act["wait"], dict):
-                inner = act["wait"]
-                seconds = inner.get("time") or inner.get("seconds") or inner.get("duration")
-                if seconds is not None:
-                    act = dict(act)
-                    act["wait"] = int(seconds)
+            # 3) {"wait": {"time": N}} / {"wait": {"seconds": N}} → 确保是 dict 格式
+            # browser-use v0.13.3 期望 {"wait": {"seconds": N}}，不是 {"wait": N}
 
             # 4) {"click": {"index": N}} → 确保整数
             if "click" in act and isinstance(act["click"], dict) and "index" in act["click"]:
@@ -548,9 +650,38 @@ class BridgeLLM:
                 act["click"] = dict(act["click"])
                 act["click"]["index"] = int(act["click"]["index"])
 
-            # 5) 检查 action key 是否合法（在 browser-use 白名单中）
+            # 5) 修复 find_elements：GLM 传 query 而非 selector
+            if "find_elements" in act and isinstance(act["find_elements"], dict):
+                inner = dict(act["find_elements"])
+                if "query" in inner and "selector" not in inner:
+                    inner["selector"] = inner.pop("query")
+                    act = dict(act)
+                    act["find_elements"] = inner
+                    print("[WARN] Auto-converted find_elements query → selector")
+
+            # 6) 修复 wait：强制为 dict 格式 {"seconds": N}（browser-use v0.13.3 不接受裸整数）
+            if "wait" in act:
+                if isinstance(act["wait"], dict):
+                    inner = act["wait"]
+                    seconds = inner.get("time") or inner.get("seconds") or inner.get("duration") or 3
+                elif isinstance(act["wait"], (int, float)):
+                    seconds = int(act["wait"])
+                else:
+                    seconds = 3
+                act = dict(act)
+                act["wait"] = {"seconds": int(seconds)}
+
+            # 7) 修复 switch 的 tab_index → tab_id（browser-use v0.13 要求 tab_id）
+            if "switch" in act and isinstance(act["switch"], dict):
+                inner = dict(act["switch"])
+                if "tab_index" in inner and "tab_id" not in inner:
+                    inner["tab_id"] = inner.pop("tab_index")
+                    act = dict(act)
+                    act["switch"] = inner
+                    print("[WARN] Auto-converted switch tab_index → tab_id")
+
+            # 8) 检查 action key 是否合法
             act_keys = set(act.keys())
-            # 过滤掉完全未知的 action key（如 LLM 幻觉生成的）
             known_keys = act_keys & ALL_KNOWN_KEYS
             if not known_keys:
                 # 没有任何已知 action key → 跳过
@@ -608,16 +739,33 @@ class BridgeLLM:
 
             cleaned.append(act)
 
-        # 9) 清理后如果 action 为空 → 用 wait 兜底（不用 done，避免 Agent 提前终止）
+        # 10) 清理后如果 action 为空 → 用 wait 兜底（不用 done，避免 Agent 提前终止）
         if not cleaned:
-            cleaned = [{"wait": 2}]
+            cleaned = [{"wait": {"seconds": 2}}]
 
         data["action"] = cleaned
         return data
 
     @staticmethod
+    def _make_default_output(output_format, msg: str = "Navigating as fallback") -> Any:
+        """构造默认兜底输出"""
+        data = {
+            'action': [{'navigate': {'url': 'https://www.zhihu.com', 'new_tab': False}}],
+            'thinking': msg,
+            'evaluation_previous_goal': '',
+            'memory': '',
+            'next_goal': 'Navigate to Zhihu'
+        }
+        return output_format.model_validate(data)
+
+    @staticmethod
     def _parse_json_output(text: str, output_format):
         """从 LLM 文本回复中提取 JSON 并用 Pydantic 模型校验"""
+        # 处理空响应
+        if not text or not text.strip():
+            print("[WARN] LLM returned empty response, injecting default navigate")
+            return BridgeLLM._make_default_output(output_format, "Auto-recovered from empty LLM response")
+
         # 调试：打印 LLM 原始回复的前 800 字符
         print(f"\n[DEBUG] LLM raw response ({len(text)} chars):\n{text[:800]}\n")
 
@@ -631,11 +779,18 @@ class BridgeLLM:
 
         candidate = BridgeLLM._extract_json_candidate(text)
 
+        # 1) 预修复：修复 GLM-5.1 奇葩 JSON 语法
+        candidate = BridgeLLM._pre_repair_json(candidate)
+
         try:
             data = json_repair.loads(candidate)
-        except Exception as e:
-            print(f"[ERROR] json_repair failed on ({len(candidate)} chars): {candidate[:400]}")
-            raise
+        except Exception:
+            print(f"[ERROR] json_repair failed on ({len(candidate)} chars): {candidate[:500]}")
+            return BridgeLLM._make_default_output(output_format, "Auto-recovered from unparseable JSON")
+
+        if not isinstance(data, dict):
+            print(f"[WARN] LLM returned non-dict ({type(data).__name__}), injecting default navigate")
+            return BridgeLLM._make_default_output(output_format, "Auto-recovered from non-dict response")
 
         # 清理 action 格式（修复 GLM-5.1 常见的格式偏差）
         data = BridgeLLM._sanitize_actions(data)
