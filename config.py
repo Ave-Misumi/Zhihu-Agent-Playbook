@@ -126,13 +126,41 @@ class BridgeLLM:
                 content = content_raw
             elif isinstance(content_raw, list):
                 parts = [self._convert_content_part(p) for p in content_raw]
-                # 仅单一文本 → 简化为字符串
                 if len(parts) == 1 and parts[0].get("type") == "text":
                     content = parts[0]["text"]
                 else:
                     content = parts
             else:
                 content = str(content_raw)
+
+            # 对 system 消息追加 JSON-only 强制指令
+            if role == "system" and isinstance(content, str):
+                if "CRITICAL OUTPUT RULE" not in content:
+                    content += (
+                        "\n\n## CRITICAL OUTPUT RULE (OVERRIDES ALL OTHER INSTRUCTIONS)\n"
+                        "You MUST respond with ONLY a valid JSON object. No XML, no tool_call tags, "
+                        "no markdown wrappers, no thinking blocks outside the JSON.\n\n"
+                        "CRITICAL: Put the \"action\" array FIRST in the JSON, before \"thinking\"！\n"
+                        "Keep thinking/evaluation_previous_goal/memory/next_goal VERY short (<50 chars each).\n"
+                        "Keep plan_update items short (<30 chars each).\n"
+                        "The JSON structure MUST be:\n"
+                        '{"action":[{"navigate":{"url":"..."}},{"click":{"index":1}}],'
+                        '"thinking":"brief","evaluation_previous_goal":"brief",'
+                        '"memory":"brief","next_goal":"brief"}\n\n'
+                        "Available actions: navigate(url), click(index), input(index,text), done(text,success), "
+                        "search(query), extract(query), scroll(amount), wait(seconds), send_keys(keys), "
+                        "write_file(file_name,content), read_file(file_name), evaluate(code), "
+                        "close, go_back, switch(tab_index), find_elements(query), find_text(text), "
+                        "dropdown_options(index), select_dropdown(index,text), search_page(query), "
+                        "save_as_pdf(path), upload_file(index,path), replace_file(file_name,content), "
+                        "get_playbook_selector(page_name,element_description), "
+                        "save_to_playbook(page_name,selector,action,description), "
+                        "execute_playwright_action(selector,action,value?), "
+                        "generate_and_insert_svg_image(article_topic), "
+                        "ask_human_for_intervention(reason).\n"
+                        "DO NOT use <tool_call>, <arg_key>, <arg_value>, <think>, or any XML/HTML tags. "
+                        "Output ONLY the JSON object, with action FIRST."
+                    )
 
             converted.append({"role": role, "content": content})
 
@@ -156,24 +184,479 @@ class BridgeLLM:
         else:
             return _Completion(completion=text)
 
+    # browser-use 内置 action key 白名单
+    BUILTIN_KEYS = {
+        "navigate", "click", "input", "done", "search", "extract",
+        "scroll", "send_keys", "find_elements", "find_text",
+        "switch", "close", "go_back", "wait", "upload_file",
+        "search_page", "save_as_pdf", "dropdown_options", "select_dropdown",
+        "write_file", "replace_file", "read_file", "evaluate",
+    }
+    # 自定义 tool key 白名单（来自 tools/ 注册）
+    CUSTOM_KEYS = {
+        "get_playbook_selector", "save_to_playbook",
+        "execute_playwright_action", "generate_and_insert_svg_image",
+        "ask_human_for_intervention",
+    }
+    ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
+
     @staticmethod
-    def _parse_json_output(text: str, output_format):
-        """从 LLM 文本回复中提取 JSON 并用 Pydantic 模型校验"""
-        # 优先匹配 ```json ... ``` 代码块
+    def _parse_tool_call_xml(text: str) -> dict | None:
+        """将 GLM-5.1 原生 <tool_call> 格式转换为 browser-use JSON 格式
+
+        GLM-5.1 输出：
+          <tool_call>write_file<arg_key>file_name</arg_key><arg_value>todo.md</arg_key>
+          <arg_key>content</arg_key><arg_value># Content...</arg_value></tool_call>
+
+        转换为：
+          {"thinking":"...","action":[{"write_file":{"file_name":"...","content":"..."}}],...}
+        """
+        # 查找所有 <tool_call> 块（结束于 </tool_call> 或 </think>）
+        tc_pattern = re.compile(r'<tool_call>(.*?)(?:</tool_call>|</think>)', re.DOTALL)
+        matches = tc_pattern.findall(text)
+        if not matches:
+            return None
+
+        actions = []
+        for raw_block in matches:
+            # 块内容：write_file<arg_key>file_name</arg_key><arg_value>todo.md</arg_key>...
+            # 或变体: write_filefile_name: "todo.md"... (无 <arg_key> 标签)
+            block = raw_block.strip()
+            has_arg_tags = '<arg_key>' in block
+
+            # 提取函数名
+            m = re.match(r'([a-z_]+)', block)
+            if not m:
+                continue
+            func_name = m.group(1)
+
+            if has_arg_tags:
+                block = block[len(func_name):]  # 去掉函数名
+
+            # 解析 <arg_key>/<arg_value> 对
+            # GLM-5.1 格式: <arg_key>K</arg_key><arg_value>V</arg_value>...
+            # 兼容缺失 </arg_value>：值以 </arg_value> 或下一个 <arg_key> 或 </tool_call> 结尾
+            params = {}
+            if has_arg_tags:
+                key_re = re.compile(r'<arg_key>(.*?)</arg_key>', re.DOTALL)
+                for km in key_re.finditer(block):
+                    key = km.group(1).strip()
+                    # 值从 </arg_key> 之后开始
+                    after_key = block[km.end():]
+                    # 以 <arg_value> 开头
+                    vm = re.match(r'\s*<arg_value>', after_key)
+                    if not vm:
+                        continue
+                    after_val_start = after_key[vm.end():]
+                    # 值到 </arg_value> 或下一个 <arg_key> 或 </tool_call> 或末尾
+                    end_m = re.search(r'</arg_value>|<arg_key>|<arg_value>', after_val_start, re.DOTALL)
+                    value = after_val_start[:end_m.start()].strip() if end_m else after_val_start.strip()
+                    params[key] = value
+            else:
+                # 无标签变体: write_filefile_name: "todo.md", content: "..."
+                # 或: navigateurl: "https://..."
+                rest = block[len(func_name):].strip()
+                # 尝试解析为 key: value 格式
+                # 先尝试作为 {key: value, ...} JSON 解析
+                if rest.startswith('{'):
+                    try:
+                        params = json_repair.loads(rest)
+                    except Exception:
+                        pass
+                else:
+                    # 解析 key: "value", key: value 格式
+                    # 将 "file_name: "a", content: "b"" 包装为 {"file_name": "a", "content": "b"}
+                    wrapped = '{' + rest + '}'
+                    try:
+                        params = json_repair.loads(wrapped)
+                    except Exception:
+                        # 手动解析 key: value 对
+                        for pair in re.finditer(r'(\w+)\s*:\s*"((?:[^"\\]|\\.)*)"', rest):
+                            params[pair.group(1)] = pair.group(2)
+                        for pair in re.finditer(r'(\w+)\s*:\s*(\d+)', rest):
+                            if pair.group(1) not in params:
+                                params[pair.group(1)] = int(pair.group(2))
+
+            if not params and func_name in ("screenshot",):
+                actions.append({"screenshot": {}})
+                continue
+
+            if not params:
+                continue
+
+            # 特殊处理
+            if func_name == "wait":
+                # wait 只需要秒数
+                seconds = params.get("time") or params.get("seconds") or 3
+                actions.append({"wait": int(seconds)})
+            elif func_name == "navigate" and "url" in params:
+                actions.append({"navigate": {"url": params["url"]}})
+            elif func_name == "click" and "index" in params:
+                actions.append({"click": {"index": int(params["index"])}})
+            elif func_name == "input" and "index" in params and "text" in params:
+                actions.append({"input": {"index": int(params["index"]), "text": params["text"]}})
+            elif func_name == "write_file" and "file_name" in params and "content" in params:
+                actions.append({"write_file": params})
+            elif func_name == "extract" and "query" in params:
+                actions.append({"extract": {"query": params["query"]}})
+            elif func_name == "scroll":
+                actions.append({"scroll": {"amount": params.get("amount", 500)}})
+            elif func_name == "done":
+                actions.append({"done": {"text": params.get("text", "Done"), "success": params.get("success", True)}})
+            elif func_name in BridgeLLM.ALL_KNOWN_KEYS:
+                actions.append({func_name: params})
+            else:
+                print(f"[WARN] Unknown function in tool_call: {func_name}")
+                continue
+
+        if not actions:
+            return None
+
+        # 提取紧接在 <tool_call> 之前的文本作为 thinking
+        first_tc = text.index('<tool_call>')
+        thinking = text[:first_tc].strip()
+        if len(thinking) > 500:
+            thinking = thinking[:500]
+
+        return {
+            "thinking": thinking or "Executing actions via tool_call",
+            "evaluation_previous_goal": "",
+            "memory": "",
+            "next_goal": "",
+            "action": actions,
+        }
+
+    @staticmethod
+    def _extract_json_candidate(text: str) -> str:
+        """从 LLM 回复中提取最可能的 JSON 候选字符串，自动修复截断"""
+        # 0) 剥离 GLM 原生标签和 tool_call 前缀
+        cleaned = re.sub(r'</?think[^>]*>', '', text, flags=re.DOTALL)
+        cleaned = re.sub(r'</?tool_call[^>]*>', '', cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r'(?:write_file|read_file|replace_file|screenshot)(?=\{)', '', cleaned)
+        if cleaned.strip():
+            text = cleaned.strip()
+
+        # 1) 代码块
         m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
         if m:
             candidate = m.group(1).strip()
-        else:
-            # 尝试匹配最外层 { ... }
-            m = re.search(r"(\{.*\})", text, re.DOTALL)
-            if m:
-                candidate = m.group(1).strip()
-            else:
-                candidate = text.strip()
+            if candidate and candidate.startswith("{"):
+                return BridgeLLM._auto_close_json(candidate)
 
-        # 使用 json_repair 容错解析（自动修复缺失逗号、多余逗号等）
-        data = json_repair.loads(candidate)
-        return output_format.model_validate(data)
+        # 2) 括号计数提取完整 JSON
+        start = 0
+        while True:
+            start = text.find("{", start)
+            if start < 0:
+                break
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == "\\":
+                    escape_next = True
+                    continue
+                if ch == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start:i + 1].strip()
+                        if '"action"' in candidate or '"thinking"' in candidate or '"current_state"' in candidate:
+                            return BridgeLLM._auto_close_json(candidate)
+                        if candidate.count('"') >= 8:
+                            return BridgeLLM._auto_close_json(candidate)
+                        start = i + 1
+                        break
+            else:
+                break
+
+        # 3) 全文回退
+        if text.strip().startswith("{"):
+            return BridgeLLM._auto_close_json(text.strip())
+        return text.strip()
+
+    @staticmethod
+    def _auto_close_json(candidate: str) -> str:
+        """自动修复被截断的 JSON：
+        1) 去掉末尾不完整片段
+        2) 闭合未结束的字符串、对象、数组
+        """
+        # 0) 检测并去掉末尾的截断片段
+        # 如果末尾在字符串内部 → 截断
+        # 如果末尾是 "key → 移除这个不完整的键
+        # 如果末尾是 "key" 后面缺 : → 移除这个键
+        c = candidate.rstrip()
+        # Remove trailing comma
+        if c.endswith(','):
+            c = c[:-1].rstrip()
+        # Remove incomplete key name like "act or "actio
+        # backtracks to last complete element before a bare quote that starts a new key
+        # Pattern: ...],"inc → back to ...],
+        # Pattern: ...,"inc → back to ...,
+        last_comma = c.rfind(',')
+        if last_comma > 0:
+            after_comma = c[last_comma + 1:].strip()
+            if after_comma.startswith('"') and not after_comma.endswith('"'):
+                # Incomplete key like "act → remove it
+                c = c[:last_comma].rstrip()
+                if c.endswith(','):
+                    c = c[:-1].rstrip()
+            elif after_comma.startswith('{') and not after_comma.endswith('}'):
+                # Incomplete nested object → remove it
+                c = c[:last_comma].rstrip()
+                if c.endswith(','):
+                    c = c[:-1].rstrip()
+            elif after_comma.startswith('[') and not after_comma.endswith(']'):
+                # Incomplete array → remove it
+                c = c[:last_comma].rstrip()
+                if c.endswith(','):
+                    c = c[:-1].rstrip()
+
+        # 1) 计算括号深度，补全未闭合的结构
+        depth = 0
+        in_string = False
+        escape_next = False
+        for ch in c:
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\':
+                escape_next = True
+                continue
+            if ch == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch in '{[':
+                depth += 1
+            elif ch in '}]':
+                depth -= 1
+
+        # 如果在字符串内，先闭合字符串
+        if in_string:
+            c += '"'
+
+        # 闭合所有未关闭的 ] 和 }
+        # 先检测最后未闭合的括号类型
+        # 从后向前扫描，找到需要闭合的 bracket 类型
+        stack = []
+        in_str = False
+        esc = False
+        for ch in c:
+            if esc:
+                esc = False
+                continue
+            if ch == '\\':
+                esc = True
+                continue
+            if ch == '"' and not esc:
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == '{':
+                stack.append('}')
+            elif ch == '}':
+                if stack and stack[-1] == '}':
+                    stack.pop()
+                else:
+                    stack.append('}')  # unmatched close
+            elif ch == '[':
+                stack.append(']')
+            elif ch == ']':
+                if stack and stack[-1] == ']':
+                    stack.pop()
+                else:
+                    stack.append(']')
+
+        # Only close unmatched opens (reversed: closing brackets)
+        while stack:
+            c += stack.pop()
+
+        return c
+
+    @staticmethod
+    def _sanitize_actions(data: dict) -> dict:
+        """清理 LLM 输出的 action 数组中的常见格式错误
+
+        GLM-5.1 已知问题：
+        - 输出 {\"screenshot\": {}} 作为 action（无效，需删除）
+        - 输出 {\"wait\": {\"time\": 10}} 而非 {\"wait\": 10}
+        - 自定义工具参数格式错误或缺失必填字段
+        """
+        # browser-use 内置 action key 白名单
+        BUILTIN_KEYS = {
+            "navigate", "click", "input", "done", "search", "extract",
+            "scroll", "send_keys", "find_elements", "find_text",
+            "switch", "close", "go_back", "wait", "upload_file",
+            "search_page", "save_as_pdf", "dropdown_options", "select_dropdown",
+            "write_file", "replace_file", "read_file", "evaluate",
+            "screenshot",  # browser-use 内置，GLM 常误调，保留但不真正执行
+        }
+        # 自定义 tool key 白名单（来自 tools/ 注册）
+        CUSTOM_KEYS = {
+            "get_playbook_selector", "save_to_playbook",
+            "execute_playwright_action", "generate_and_insert_svg_image",
+            "ask_human_for_intervention",
+        }
+        ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
+
+        if not isinstance(data, dict) or "action" not in data:
+            return data
+
+        actions = data["action"]
+        if not isinstance(actions, list):
+            return data
+
+        cleaned = []
+        for act in actions:
+            if not isinstance(act, dict):
+                cleaned.append(act)
+                continue
+
+            # 1) {"screenshot": {}} → 替换为短暂 wait（避免 Agent 提前终止）
+            if set(act.keys()) == {"screenshot"}:
+                cleaned.append({"wait": 1})
+                print("[WARN] Replaced screenshot action with wait(1)")
+                continue
+            # 2) 删除纯空对象 {}
+            if not act:
+                continue
+
+            # 3) {"wait": {"time": N}} / {"wait": {"seconds": N}} → {"wait": N}
+            if "wait" in act and isinstance(act["wait"], dict):
+                inner = act["wait"]
+                seconds = inner.get("time") or inner.get("seconds") or inner.get("duration")
+                if seconds is not None:
+                    act = dict(act)
+                    act["wait"] = int(seconds)
+
+            # 4) {"click": {"index": N}} → 确保整数
+            if "click" in act and isinstance(act["click"], dict) and "index" in act["click"]:
+                act = dict(act)
+                act["click"] = dict(act["click"])
+                act["click"]["index"] = int(act["click"]["index"])
+
+            # 5) 检查 action key 是否合法（在 browser-use 白名单中）
+            act_keys = set(act.keys())
+            # 过滤掉完全未知的 action key（如 LLM 幻觉生成的）
+            known_keys = act_keys & ALL_KNOWN_KEYS
+            if not known_keys:
+                # 没有任何已知 action key → 跳过
+                print(f"[WARN] Skipping unknown action: {act}")
+                continue
+            # 只保留已知 key
+            if len(known_keys) < len(act_keys):
+                unknown = act_keys - ALL_KNOWN_KEYS
+                act = {k: v for k, v in act.items() if k in ALL_KNOWN_KEYS}
+                print(f"[WARN] Removed unknown keys: {unknown}")
+
+            # 6) 修复 execute_playwright_action：确保有 selector 字段
+            if "execute_playwright_action" in act:
+                inner = act["execute_playwright_action"]
+                if isinstance(inner, dict):
+                    # 去除多余字段（params 不在 schemas 中）
+                    inner.pop("params", None)
+                    if not inner.get("selector"):
+                        inner["selector"] = "body"
+                    if "action" not in inner:
+                        inner["action"] = "click"
+                    act["execute_playwright_action"] = inner
+
+            # 7) 修复 generate_and_insert_svg_image：确保有 article_topic
+            if "generate_and_insert_svg_image" in act:
+                inner = act["generate_and_insert_svg_image"]
+                if isinstance(inner, dict) and "article_topic" not in inner:
+                    inner["article_topic"] = "AI Agent Trends"
+                elif not inner or inner == {}:
+                    act["generate_and_insert_svg_image"] = {"article_topic": "AI Trends"}
+
+            # 8) 修复 ask_human_for_intervention：确保有 reason
+            if "ask_human_for_intervention" in act:
+                inner = act["ask_human_for_intervention"]
+                if isinstance(inner, dict) and "reason" not in inner:
+                    inner["reason"] = "需要人工处理"
+                elif not inner or inner == {}:
+                    act["ask_human_for_intervention"] = {"reason": "需要人工处理"}
+
+            cleaned.append(act)
+
+        # 9) 清理后如果 action 为空 → 用 wait 兜底（不用 done，避免 Agent 提前终止）
+        if not cleaned:
+            cleaned = [{"wait": 2}]
+
+        data["action"] = cleaned
+        return data
+
+    @staticmethod
+    def _parse_json_output(text: str, output_format):
+        """从 LLM 文本回复中提取 JSON 并用 Pydantic 模型校验"""
+        # 调试：打印 LLM 原始回复的前 800 字符
+        print(f"\n[DEBUG] LLM raw response ({len(text)} chars):\n{text[:800]}\n")
+
+        # 0) 先尝试 GLM-5.1 原生 <tool_call> XML 格式
+        if '<tool_call>' in text:
+            data = BridgeLLM._parse_tool_call_xml(text)
+            if data:
+                print(f"[DEBUG] Parsed via tool_call XML: {len(data['action'])} actions")
+                data = BridgeLLM._sanitize_actions(data)
+                return output_format.model_validate(data)
+
+        candidate = BridgeLLM._extract_json_candidate(text)
+
+        try:
+            data = json_repair.loads(candidate)
+        except Exception as e:
+            print(f"[ERROR] json_repair failed on ({len(candidate)} chars): {candidate[:400]}")
+            raise
+
+        # 清理 action 格式（修复 GLM-5.1 常见的格式偏差）
+        data = BridgeLLM._sanitize_actions(data)
+
+        # 如果没有有效的 action，注入一个合理的默认动作
+        if not isinstance(data.get('action'), list) or not data['action']:
+            print("[WARN] No valid actions in LLM output, injecting default: navigate to zhihu")
+            data['action'] = [{"navigate": {"url": "https://www.zhihu.com", "new_tab": False}}]
+            if not data.get('thinking'):
+                data['thinking'] = 'Navigating to Zhihu as default action'
+            if not data.get('evaluation_previous_goal'):
+                data['evaluation_previous_goal'] = ''
+            if not data.get('memory'):
+                data['memory'] = ''
+            if not data.get('next_goal'):
+                data['next_goal'] = 'Navigate to Zhihu'
+        elif not any(isinstance(a, dict) and a for a in data['action']):
+            print("[WARN] All actions empty, injecting default: navigate to zhihu")
+            data['action'] = [{"navigate": {"url": "https://www.zhihu.com", "new_tab": False}}]
+
+        try:
+            return output_format.model_validate(data)
+        except Exception as e:
+            # 如果 model_validate 失败，尝试仅对 action 字段做容错
+            errors = e.errors() if hasattr(e, 'errors') else []
+            action_field = next((err for err in errors if 'action' in str(err.get('loc', []))), None)
+            if action_field and isinstance(data, dict) and 'action' not in data:
+                # LLM 没有输出 action 字段 → 填入一个占位 done 动作
+                data['action'] = [{"done": {"text": "任务因格式错误终止", "success": False}}]
+                data['thinking'] = data.get('thinking', '(auto-repaired)')
+                data['evaluation_previous_goal'] = data.get('evaluation_previous_goal', '')
+                data['memory'] = data.get('memory', '')
+                data['next_goal'] = data.get('next_goal', '')
+                return output_format.model_validate(data)
+
+            print(f"[ERROR] Pydantic validation failed. Parsed data: {json.dumps(data, ensure_ascii=False)[:500]}")
+            raise
 
 
 def get_llm():
@@ -187,8 +670,10 @@ def get_llm():
         model=LLM_MODEL,
         base_url=LLM_BASE_URL,
         api_key=LLM_API_KEY,
-        temperature=0.7,
-        timeout=120,
+        temperature=0.3,
+        timeout=180,
+        max_retries=2,
+        model_kwargs={"max_tokens": 4096},
     )
     return BridgeLLM(inner)
 

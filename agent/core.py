@@ -66,5 +66,7 @@ async def create_zhihu_agent(task: str):
         tools=custom_tools,
         extend_system_message=system_prompt,
         max_steps=50,
+        llm_timeout=180,
+        use_vision=False,
     )
     return agent
