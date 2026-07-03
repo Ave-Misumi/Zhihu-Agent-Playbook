@@ -590,6 +590,22 @@ class BridgeLLM:
                 elif not inner or inner == {}:
                     act["ask_human_for_intervention"] = {"reason": "需要人工处理"}
 
+            # 9) GLM 常把 write_file 写成 replace_file → 自动修正
+            if "replace_file" in act and isinstance(act["replace_file"], dict):
+                inner = act["replace_file"]
+                # replace_file 需要 old_str/new_str，如果传了 file_name/content → 应该是 write_file
+                if ("file_name" in inner or "content" in inner) and "old_str" not in inner:
+                    # 保留 file_name + content，转换为 write_file
+                    new_inner = {}
+                    if "file_name" in inner:
+                        new_inner["file_name"] = inner["file_name"]
+                    if "content" in inner:
+                        new_inner["content"] = inner["content"]
+                    act = dict(act)
+                    del act["replace_file"]
+                    act["write_file"] = new_inner
+                    print("[WARN] Auto-converted replace_file → write_file")
+
             cleaned.append(act)
 
         # 9) 清理后如果 action 为空 → 用 wait 兜底（不用 done，避免 Agent 提前终止）
