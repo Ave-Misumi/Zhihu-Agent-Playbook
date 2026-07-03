@@ -688,7 +688,28 @@ class BridgeLLM:
                     act["switch"] = inner
                     print("[WARN] Auto-converted switch tab_id int → str")
 
-            # 8) LLM 幻觉工具名映射：Qwen 常见幻觉 → 真实工具
+            # 8) 修复 evaluate：Qwen 常输出字符串 {"evaluate":"JS"} 而非 {"evaluate":{"code":"JS"}}
+            if "evaluate" in act and isinstance(act["evaluate"], str):
+                act = dict(act)
+                act["evaluate"] = {"code": act["evaluate"]}
+                print("[WARN] Auto-wrapped evaluate string → {code:...}")
+
+            # 8b) 修复 find_elements：Qwen 常输出字符串 {"find_elements":"selector"} 而非 dict
+            if "find_elements" in act and isinstance(act["find_elements"], str):
+                act = dict(act)
+                act["find_elements"] = {"selector": act["find_elements"]}
+                print("[WARN] Auto-wrapped find_elements string → {selector:...}")
+
+            # 9) 修复 switch tab_id 格式：真实 CDP ID 固定 4 位十六进制，不是 4 位的全替换
+            #    int→str 得 "0"（太短）、科学计数法 56E6→"56000000.0"（太长）都无效
+            if "switch" in act and isinstance(act["switch"], dict):
+                inner = act["switch"]
+                tab_id_val = inner.get("tab_id", "")
+                if isinstance(tab_id_val, str) and len(tab_id_val) != 4:
+                    act = {"navigate": {"url": "https://www.zhihu.com", "new_tab": False}}
+                    print(f"[WARN] Replaced switch(tab_id='{tab_id_val}', len={len(tab_id_val)}) → navigate")
+
+            # 10) LLM 幻觉工具名映射：Qwen 常见幻觉 → 真实工具
             # get_playwright_action → get_playbook_selector
             if "get_playwright_action" in act:
                 old_val = act.pop("get_playwright_action")
@@ -880,7 +901,7 @@ def get_llm():
         temperature=0.3,
         timeout=180,
         max_retries=2,
-        model_kwargs={"max_tokens": 4096},
+        max_tokens=4096,
     )
     return BridgeLLM(inner)
 
