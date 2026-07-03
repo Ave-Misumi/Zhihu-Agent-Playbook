@@ -616,6 +616,8 @@ class BridgeLLM:
             "get_playbook_selector", "save_to_playbook",
             "execute_playwright_action", "generate_and_insert_svg_image",
             "ask_human_for_intervention",
+            # 常见 LLM 幻觉名称 → 自动映射到真实工具
+            "get_playwright_action",  # Qwen 常幻觉此名 → 映射为 get_playbook_selector
         }
         ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
 
@@ -671,16 +673,50 @@ class BridgeLLM:
                 act = dict(act)
                 act["wait"] = {"seconds": int(seconds)}
 
-            # 7) 修复 switch 的 tab_index → tab_id（browser-use v0.13 要求 tab_id）
+            # 7) 修复 switch 的 tab_index → tab_id，且强制 tab_id 为字符串
             if "switch" in act and isinstance(act["switch"], dict):
                 inner = dict(act["switch"])
                 if "tab_index" in inner and "tab_id" not in inner:
-                    inner["tab_id"] = inner.pop("tab_index")
+                    inner["tab_id"] = str(inner.pop("tab_index"))
                     act = dict(act)
                     act["switch"] = inner
-                    print("[WARN] Auto-converted switch tab_index → tab_id")
+                    print("[WARN] Auto-converted switch tab_index → tab_id (str)")
+                elif "tab_id" in inner and not isinstance(inner["tab_id"], str):
+                    inner = dict(inner)
+                    inner["tab_id"] = str(inner["tab_id"])
+                    act = dict(act)
+                    act["switch"] = inner
+                    print("[WARN] Auto-converted switch tab_id int → str")
 
-            # 8) 检查 action key 是否合法
+            # 8) LLM 幻觉工具名映射：Qwen 常见幻觉 → 真实工具
+            # get_playwright_action → get_playbook_selector
+            if "get_playwright_action" in act:
+                old_val = act.pop("get_playwright_action")
+                # 映射参数: element_description 可能在字符串里或对象里
+                mapped = {}
+                if isinstance(old_val, str):
+                    mapped["element_description"] = old_val
+                elif isinstance(old_val, dict):
+                    mapped["page_name"] = old_val.get("page_name", "")
+                    mapped["element_description"] = old_val.get("element_description", "")
+                act = dict(act)
+                act["get_playbook_selector"] = mapped
+                print("[WARN] Mapped hallucinated get_playwright_action → get_playbook_selector")
+
+            # 9) 修复 ask_human_for_intervention: Qwen 常输出字符串而非 {reason:...}
+            if "ask_human_for_intervention" in act:
+                inner = act["ask_human_for_intervention"]
+                if isinstance(inner, str):
+                    act = dict(act)
+                    act["ask_human_for_intervention"] = {"reason": inner}
+                    print("[WARN] Auto-wrapped ask_human_for_intervention string → {reason:...}")
+                elif isinstance(inner, dict) and "reason" not in inner:
+                    act = dict(act)
+                    act["ask_human_for_intervention"] = {"reason": "需要人工处理"}
+                elif not inner or inner == {}:
+                    act["ask_human_for_intervention"] = {"reason": "需要人工处理"}
+
+            # 10) 检查 action key 是否合法
             act_keys = set(act.keys())
             known_keys = act_keys & ALL_KNOWN_KEYS
             if not known_keys:

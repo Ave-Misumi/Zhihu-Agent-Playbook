@@ -57,6 +57,10 @@ async def create_zhihu_agent(task: str):
     3. 如果手册中没有，或者执行报错（页面改版），则使用浏览器默认工具进行 DOM 探索，成功后务必调用 `save_to_playbook` 更新手册。
     4. 写文章时，必须调用 `generate_and_insert_svg_image` 生成配图。
     5. 遇到验证码或登录失效，立即调用 `ask_human_for_intervention`。
+
+    【知乎平台限制 - 必须遵守】：
+    - 绝对不能给自己的文章/内容点赞，知乎会阻止此操作。看到「喜欢」按钮直接跳过。
+    - 如果点赞失败或弹窗提示无法互动，不要重试，立即进入下一步。
     """
 
     agent = Agent(
