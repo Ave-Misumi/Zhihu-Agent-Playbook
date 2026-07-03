@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import json_repair
+
 # ==========================================
 # 加载 .env 文件（如果存在）
 # ==========================================
@@ -169,7 +171,8 @@ class BridgeLLM:
             else:
                 candidate = text.strip()
 
-        data = json.loads(candidate)
+        # 使用 json_repair 容错解析（自动修复缺失逗号、多余逗号等）
+        data = json_repair.loads(candidate)
         return output_format.model_validate(data)
 
 
