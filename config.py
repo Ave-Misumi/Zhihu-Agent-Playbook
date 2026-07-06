@@ -757,6 +757,8 @@ class BridgeLLM:
                 cleaned.append(act)
                 continue
 
+            # (removed: evaluate→paste_article_body, input→paste_article_body — paste is deprecated)
+
             # 1) {"screenshot": {}} → 替换为短暂 wait（避免 Agent 提前终止）
             if set(act.keys()) == {"screenshot"}:
                 cleaned.append({"wait": 1})
@@ -1105,7 +1107,7 @@ def get_llm():
         temperature=0.3,
         timeout=180,
         max_retries=2,
-        max_tokens=4096,
+        max_tokens=8192,
     )
     return BridgeLLM(inner)
 

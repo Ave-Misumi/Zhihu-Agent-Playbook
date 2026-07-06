@@ -14,19 +14,12 @@ async def main():
     if len(sys.argv) > 1:
         user_task = " ".join(sys.argv[1:])
     else:
-        article_path = Path(__file__).parent / "article_content.md"
-        if article_path.exists():
-            with open(article_path, "r", encoding="utf-8") as f:
-                article_text = f.read()
-        else:
-            article_text = "写一篇关于2026年AI Agent发展趋势的专业文章"
         user_task = (
             "任务：登录知乎 → 打开写文章 → 标题填「2026年AI Agent发展趋势」→ "
-            "正文复制下方内容 → 配图(generate_and_insert_svg_image) → 发布 → "
+            "正文由LLM自行创作一段100字左右关于AI Agent的短文 → "
+            "配图(generate_and_insert_svg_image) → 发布 → "
             "首页搜索「2026年AI Agent发展趋势」→ 找到文章 → 评论+收藏（跳过点赞）。\n"
-            "搜索技巧：最多搜3次，搜不到直接导航 https://zhuanlan.zhihu.com/p/ 打开已发布的文章。\n\n"
-            "---文章正文---\n"
-            + article_text
+            "搜索技巧：最多搜2次，搜不到则直接打开已发布文章页面。"
         )
     
     print("==> 正在启动 Zhihu-Agent-Playbook...")

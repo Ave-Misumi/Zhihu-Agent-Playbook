@@ -258,3 +258,76 @@
 {"ts": "2026-07-06T11:07:08.014344", "step": 25, "page": "zhihu", "label": "a(交互设计等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"交互设计等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
 {"ts": "2026-07-06T11:07:08.014344", "step": 25, "page": "zhihu", "label": "a(游戏开发等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"游戏开发等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
 {"ts": "2026-07-06T11:07:15.426277", "step": 26, "page": "zhihu_article", "label": "input[placeholder=内马尔宣布国家队退役]", "selector": "#Popover1-toggle", "url": "https://zhuanlan.zhihu.com/p/2057419202521257048"}
+{"ts": "2026-07-06T14:35:20.262216", "step": 1, "page": "zhihu_article", "label": "a.SignFlow-orgLink", "selector": "a.SignFlow-orgLink", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:35:20.263213", "step": 1, "page": "zhihu_article", "label": "input[placeholder=手机号]", "selector": "input[placeholder=\"手机号\"]", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:35:20.263213", "step": 1, "page": "zhihu_article", "label": "input[placeholder=输入 6 位短信验证码]", "selector": "input[placeholder=\"输入 6 位短信验证码\"]", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:35:20.263213", "step": 1, "page": "zhihu_article", "label": "button.Button.CountingDownButton", "selector": "button.Button.CountingDownButton.SignFlow-smsInputButton", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:35:20.263753", "step": 1, "page": "zhihu_article", "label": "button.Button.Login-cannotLogin", "selector": "button.Button.Login-cannotLogin.FEfUrdfMIKpQDJDqkjte", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:35:20.263753", "step": 1, "page": "zhihu_article", "label": "button.Button.SignFlow-submitButton", "selector": "button.Button.SignFlow-submitButton.FEfUrdfMIKpQDJDqkjte", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:35:20.263753", "step": 1, "page": "zhihu_article", "label": "button.SignFlowQRImage-closeButton", "selector": "button.SignFlowQRImage-closeButton", "url": "https://zhuanlan.zhihu.com/p/"}
+{"ts": "2026-07-06T14:36:24.287680", "step": 3, "page": "zhihu", "label": "button(6条通知)", "selector": "button[aria-label=\"6条通知\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.287680", "step": 3, "page": "zhihu", "label": "button(3条私信)", "selector": "button[aria-label=\"3条私信\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.287680", "step": 3, "page": "zhihu", "label": "button(赞同 2.3 万)", "selector": "button[aria-label=\"赞同 2.3 万\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.288676", "step": 3, "page": "zhihu", "label": "button(赞同 7581)", "selector": "button[aria-label=\"赞同 7581\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.288676", "step": 3, "page": "zhihu", "label": "button(赞同 438)", "selector": "button[aria-label=\"赞同 438\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.289673", "step": 3, "page": "zhihu", "label": "button(赞同 2661)", "selector": "button[aria-label=\"赞同 2661\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.289673", "step": 3, "page": "zhihu", "label": "button(赞同 256)", "selector": "button[aria-label=\"赞同 256\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.290671", "step": 3, "page": "zhihu", "label": "button(赞同 406)", "selector": "button[aria-label=\"赞同 406\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.290671", "step": 3, "page": "zhihu", "label": "button(赞同 52)", "selector": "button[aria-label=\"赞同 52\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.291667", "step": 3, "page": "zhihu", "label": "a(三边坡经理室圈子-投放「投放计划」)", "selector": "a[aria-label=\"三边坡经理室圈子-投放「投放计划」\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.292663", "step": 3, "page": "zhihu", "label": "a(环球探险家，代表作《我们的侣行》)", "selector": "a[aria-label=\"环球探险家，代表作《我们的侣行》\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.292663", "step": 3, "page": "zhihu", "label": "a(电影话题下的优秀答主)", "selector": "a[aria-label=\"电影话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.292663", "step": 3, "page": "zhihu", "label": "a(语言学话题下的优秀答主)", "selector": "a[aria-label=\"语言学话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.293659", "step": 3, "page": "zhihu", "label": "a(创业话题下的优秀答主)", "selector": "a[aria-label=\"创业话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.293659", "step": 3, "page": "zhihu", "label": "a(科技等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"科技等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:36:24.293659", "step": 3, "page": "zhihu", "label": "a(中央处理器 (CPU)等 6 个话题下的优秀答主)", "selector": "a[aria-label=\"中央处理器 (CPU)等 6 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:38:15.884524", "step": 11, "page": "zhihu_article", "label": "input(搜索话题)", "selector": "input[aria-label=\"搜索话题\"]", "url": "https://zhuanlan.zhihu.com/p/2057473071393642434/edit"}
+{"ts": "2026-07-06T14:48:58.924480", "step": 3, "page": "zhihu", "label": "input[placeholder=内马尔哭了]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.924480", "step": 3, "page": "zhihu", "label": "button(赞同 427)", "selector": "button[aria-label=\"赞同 427\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.924480", "step": 3, "page": "zhihu", "label": "button(赞同 48)", "selector": "button[aria-label=\"赞同 48\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.924480", "step": 3, "page": "zhihu", "label": "button(赞同 11)", "selector": "button[aria-label=\"赞同 11\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.925477", "step": 3, "page": "zhihu", "label": "a(物理学话题下的优秀答主)", "selector": "a[aria-label=\"物理学话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.925477", "step": 3, "page": "zhihu", "label": "a(古生物学话题下的优秀答主)", "selector": "a[aria-label=\"古生物学话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.925477", "step": 3, "page": "zhihu", "label": "a(ACG话题下的优秀答主)", "selector": "a[aria-label=\"ACG话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.925477", "step": 3, "page": "zhihu", "label": "a(科普话题下的优秀答主)", "selector": "a[aria-label=\"科普话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:48:58.925477", "step": 3, "page": "zhihu", "label": "a(知势榜影响力榜体育竞技领域答主)", "selector": "a[aria-label=\"知势榜影响力榜体育竞技领域答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.274628", "step": 3, "page": "zhihu", "label": "button(赞同 1499)", "selector": "button[aria-label=\"赞同 1499\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.274628", "step": 3, "page": "zhihu", "label": "button(赞同 112)", "selector": "button[aria-label=\"赞同 112\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.274628", "step": 3, "page": "zhihu", "label": "button(赞同 5)", "selector": "button[aria-label=\"赞同 5\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.275627", "step": 3, "page": "zhihu", "label": "button(赞同 1.5 万)", "selector": "button[aria-label=\"赞同 1.5 万\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.275627", "step": 3, "page": "zhihu", "label": "button(赞同 592)", "selector": "button[aria-label=\"赞同 592\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.275627", "step": 3, "page": "zhihu", "label": "a(互联网话题下的优秀答主)", "selector": "a[aria-label=\"互联网话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.275627", "step": 3, "page": "zhihu", "label": "a(天文学话题下的优秀答主)", "selector": "a[aria-label=\"天文学话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.275627", "step": 3, "page": "zhihu", "label": "a(武汉大学 机械电子工程博士)", "selector": "a[aria-label=\"武汉大学 机械电子工程博士\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.276621", "step": 3, "page": "zhihu", "label": "a(知势榜影响力榜教育校园领域答主)", "selector": "a[aria-label=\"知势榜影响力榜教育校园领域答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.276621", "step": 3, "page": "zhihu", "label": "a(数学等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"数学等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.276621", "step": 3, "page": "zhihu", "label": "a(电子商务话题下的优秀答主)", "selector": "a[aria-label=\"电子商务话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.276621", "step": 3, "page": "zhihu", "label": "a(经济学话题下的优秀答主)", "selector": "a[aria-label=\"经济学话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T14:59:10.276621", "step": 3, "page": "zhihu", "label": "a(作家，雨果奖获得者 代表作《北京折叠》)", "selector": "a[aria-label=\"作家，雨果奖获得者 代表作《北京折叠》\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.619743", "step": 3, "page": "zhihu", "label": "input[placeholder=广西多水库发生险情]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.619743", "step": 3, "page": "zhihu", "label": "a.wrap.external", "selector": "a.wrap.external", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.620740", "step": 3, "page": "zhihu", "label": "button(赞同 151)", "selector": "button[aria-label=\"赞同 151\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.620740", "step": 3, "page": "zhihu", "label": "button(赞同 115)", "selector": "button[aria-label=\"赞同 115\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.620740", "step": 3, "page": "zhihu", "label": "button(赞同 45)", "selector": "button[aria-label=\"赞同 45\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.620740", "step": 3, "page": "zhihu", "label": "button(赞同 24)", "selector": "button[aria-label=\"赞同 24\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.620740", "step": 3, "page": "zhihu", "label": "button(赞同 228)", "selector": "button[aria-label=\"赞同 228\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.621736", "step": 3, "page": "zhihu", "label": "button(赞同 36)", "selector": "button[aria-label=\"赞同 36\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.621736", "step": 3, "page": "zhihu", "label": "a(零一万物 CEO、创新工场董事长)", "selector": "a[aria-label=\"零一万物 CEO、创新工场董事长\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.621736", "step": 3, "page": "zhihu", "label": "a(自动驾驶话题下的优秀答主)", "selector": "a[aria-label=\"自动驾驶话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.621736", "step": 3, "page": "zhihu", "label": "a(互联网行业 从业人员)", "selector": "a[aria-label=\"互联网行业 从业人员\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.621736", "step": 3, "page": "zhihu", "label": "a(知名导演、编剧、监制)", "selector": "a[aria-label=\"知名导演、编剧、监制\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:08:07.622732", "step": 3, "page": "zhihu", "label": "a(金融话题下的优秀答主)", "selector": "a[aria-label=\"金融话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.106268", "step": 3, "page": "zhihu", "label": "button(赞同 4)", "selector": "button[aria-label=\"赞同 4\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.107264", "step": 3, "page": "zhihu", "label": "button(赞同 12)", "selector": "button[aria-label=\"赞同 12\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.107264", "step": 3, "page": "zhihu", "label": "button(赞同 3.5 万)", "selector": "button[aria-label=\"赞同 3.5 万\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.107264", "step": 3, "page": "zhihu", "label": "button(赞同 46)", "selector": "button[aria-label=\"赞同 46\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.107264", "step": 3, "page": "zhihu", "label": "button(赞同 25)", "selector": "button[aria-label=\"赞同 25\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.107264", "step": 3, "page": "zhihu", "label": "button(赞同 275)", "selector": "button[aria-label=\"赞同 275\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.108262", "step": 3, "page": "zhihu", "label": "button(赞同 1.4 万)", "selector": "button[aria-label=\"赞同 1.4 万\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.108262", "step": 3, "page": "zhihu", "label": "a(作曲等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"作曲等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.108262", "step": 3, "page": "zhihu", "label": "a(漫画等 5 个话题下的优秀答主)", "selector": "a[aria-label=\"漫画等 5 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.108262", "step": 3, "page": "zhihu", "label": "a(知势榜影响力榜数码领域答主)", "selector": "a[aria-label=\"知势榜影响力榜数码领域答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.108262", "step": 3, "page": "zhihu", "label": "a(基金话题下的优秀答主)", "selector": "a[aria-label=\"基金话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.109258", "step": 3, "page": "zhihu", "label": "a(宁波维特网络科技有限公司 法定代表人)", "selector": "a[aria-label=\"宁波维特网络科技有限公司 法定代表人\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.109258", "step": 3, "page": "zhihu", "label": "a(宜春乾涞自动化机械设备有限公司 法定代表人)", "selector": "a[aria-label=\"宜春乾涞自动化机械设备有限公司 法定代表人\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-06T15:13:00.109258", "step": 3, "page": "zhihu", "label": "a(心理咨询等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"心理咨询等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
