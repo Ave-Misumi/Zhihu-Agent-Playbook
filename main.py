@@ -15,11 +15,16 @@ async def main():
         user_task = " ".join(sys.argv[1:])
     else:
         user_task = (
-            "任务：登录知乎 → 打开写文章 → 标题填「2026年AI Agent发展趋势」→ "
-            "正文由LLM自行创作一段100字左右关于AI Agent的短文 → "
-            "配图(generate_and_insert_svg_image) → 发布 → "
-            "首页搜索「2026年AI Agent发展趋势」→ 找到文章 → 评论+收藏（跳过点赞）。\n"
-            "搜索技巧：最多搜2次，搜不到则直接打开已发布文章页面。"
+            "严格执行以下7步，必须按顺序逐一完成，完成后立即 done：\n"
+            "Step1: 登录知乎\n"
+            "Step2: 打开写文章页面\n"
+            "Step3: 标题「2026年AI Agent发展趋势」，LLM自创一段100字短文作为正文，input 填入\n"
+            "Step4: 调用 generate_and_insert_svg_image 插入配图\n"
+            "Step5: 点击发布\n"
+            "Step6: 回到知乎首页，搜索框搜索文章标题，找到刚发布的文章，\n"
+            "        搜不到则直接用 navigate 跳转到已发布文章URL\n"
+            "Step7: 对文章发表一条评论 + 点击收藏（跳过点赞）→ 立即 done(success=true)\n"
+            "⚠️ 必须按以上顺序执行！禁止在搜索前做评论/收藏。完成后立即 done，不要继续浏览。"
         )
     
     print("==> 正在启动 Zhihu-Agent-Playbook...")
