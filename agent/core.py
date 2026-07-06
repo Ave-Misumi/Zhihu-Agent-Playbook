@@ -55,16 +55,21 @@ async def create_zhihu_agent(task: str):
 4. 评论 + 收藏
 5. 立即调用 done 结束
 
+知乎写文章页面固定流程（已知弹窗直接关，不犹豫）：
+- 进入 zhuanlan.zhihu.com/write 后等 2 秒，必弹「创作助手」→ 直接点 aria-label="关闭创作助手" 或找关闭按钮关掉
+- 关弹窗后填标题、input 正文、配图，然后找「发布」按钮发布
+- 发布后可能弹成功提示 → 直接关掉或忽略，不需要等待确认
+- 发布后页面 URL 会变（含文章 ID），记住这个 URL 或标题供搜索
+
 规则：
-- 直接使用浏览器基础操作（click/input/navigate/scroll/wait/evaluate），不要调用 playbook 工具。
+- 直接使用基础操作（click/input/navigate/scroll/wait/evaluate）。
 - 文章由你自己创作（100字左右），标题和正文都用 input 填入。
 - 配图调 generate_and_insert_svg_image。
-- 必须先发布、再搜索、再评论收藏。绝对禁止在搜索前做任何评论/收藏操作。
-- 全部任务完成后立即调用 done（success=true），不要继续浏览或做额外操作。
+- 遇到已知弹窗直接关，不要截图分析浪费步骤。
+- 必须先发布、再搜索、再评论收藏。
+- 全部任务完成后立即 done（success=true），不继续浏览。
 - 遇到验证码/登录卡住 → ask_human_for_intervention。
-- 严禁给自己的文章/内容点赞。
-- 禁止微信扫码登录；已登录直接操作，不主动点登录。
-- 搜索技巧：首页搜索框搜标题，最多3次尝试，搜不到直接导航到文章URL。
+- 严禁自我点赞。禁止微信扫码登录。
 """
 
     agent = Agent(
