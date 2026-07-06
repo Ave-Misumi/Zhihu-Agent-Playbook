@@ -259,8 +259,9 @@ class AutoMemoryCollector:
                 )
                 print(
                     f"[AutoMemory] Step {step_num} | {page}: "
-                    f"+{saved_this_step} new selector(s) "
-                    f"(total {len(page_elements)} on this page)"
+                    f"+{saved_this_step} new, "
+                    f"total {len(page_elements)} (hit rate on this page: "
+                    f"{starting_count}/{starting_count + saved_this_step} reused)"
                 )
 
         except Exception as e:

@@ -146,16 +146,6 @@ def get_playbook_selector(page_name: str, element_description: str) -> str:
     return "手册中暂无此页面元素记录，请使用浏览器默认工具进行探索。"
 
 
-def save_to_playbook(page_name: str, element_description: str, css_selector_or_xpath: str) -> str:
-    """将成功定位到的页面元素选择器记录到操作手册中，以便下次毫秒级直接执行。"""
-    playbook = load_playbook()
-    if page_name not in playbook:
-        playbook[page_name] = {}
-    playbook[page_name][element_description] = css_selector_or_xpath
-    save_playbook(playbook)
-    return f"已成功记录到操作手册: {page_name} -> {element_description}"
-
-
 async def execute_playwright_action(
     browser_session: BrowserSession,
     selector: str,

@@ -4,7 +4,7 @@ from browser_use.browser.profile import BrowserProfile
 from browser_use.tools.service import Tools
 
 from config import get_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR
-from tools.playbook import get_playbook_selector, save_to_playbook, execute_playwright_action
+from tools.playbook import get_playbook_selector, execute_playwright_action
 from tools.image_gen import generate_and_insert_svg_image
 from tools.human_in_loop import ask_human_for_intervention
 from tools.auto_memory import create_auto_memory_callback
@@ -17,10 +17,6 @@ def create_custom_tools() -> Tools:
     tools.registry.action(
         description="从操作手册中获取指定页面元素的CSS选择器或XPath。如果手册中有记录，请直接使用返回的选择器进行Playwright操作，无需再截图识别。"
     )(get_playbook_selector)
-    
-    tools.registry.action(
-        description="将成功定位到的页面元素选择器记录到操作手册中，以便下次毫秒级直接执行。"
-    )(save_to_playbook)
     
     tools.registry.action(
         description="直接通过Playwright执行点击或输入操作（用于命中操作手册后的极速执行）。"
@@ -53,7 +49,7 @@ async def create_zhihu_agent(task: str):
 你是一个知乎自动化 Agent，速度优先。
 
 规则：
-- 直接使用浏览器基础操作（click/input/navigate/scroll/wait/evaluate），不要调用 playbook 工具。
+ - 直接使用浏览器基础操作（click/input/navigate/scroll/wait/evaluate），不要调用 playbook 工具。
 - 写文章时必须调用 generate_and_insert_svg_image 配图。
 - 遇到验证码/登录卡住 → ask_human_for_intervention。
 - 严禁给自己的文章/内容点赞。

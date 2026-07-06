@@ -155,7 +155,6 @@ class BridgeLLM:
                         "dropdown_options(index), select_dropdown(index,text), search_page(query), "
                         "save_as_pdf(path), upload_file(index,path), replace_file(file_name,content), "
                         "get_playbook_selector(page_name,element_description), "
-                        "save_to_playbook(page_name,selector,action,description), "
                         "execute_playwright_action(selector,action,value?), "
                         "generate_and_insert_svg_image(article_topic), "
                         "ask_human_for_intervention(reason).\n"
@@ -195,7 +194,7 @@ class BridgeLLM:
     }
     # 自定义 tool key 白名单（来自 tools/ 注册）
     CUSTOM_KEYS = {
-        "get_playbook_selector", "save_to_playbook",
+        "get_playbook_selector",
         "execute_playwright_action", "generate_and_insert_svg_image",
         "ask_human_for_intervention",
         # 常见 LLM 幻觉名称 → 自动映射到真实工具
@@ -638,7 +637,7 @@ class BridgeLLM:
             'send_keys', 'find_elements', 'find_text', 'switch', 'close', 'go_back',
             'wait', 'upload_file', 'search_page', 'save_as_pdf', 'dropdown_options',
             'select_dropdown', 'write_file', 'replace_file', 'read_file', 'evaluate',
-            'screenshot', 'get_playbook_selector', 'save_to_playbook',
+            'screenshot', 'get_playbook_selector',
             'execute_playwright_action', 'generate_and_insert_svg_image',
             'ask_human_for_intervention'
         }
@@ -717,7 +716,7 @@ class BridgeLLM:
         }
         # 自定义 tool key 白名单（来自 tools/ 注册）
         CUSTOM_KEYS = {
-            "get_playbook_selector", "save_to_playbook",
+            "get_playbook_selector",
             "execute_playwright_action", "generate_and_insert_svg_image",
             "ask_human_for_intervention",
             # 常见 LLM 幻觉名称 → 自动映射到真实工具
