@@ -48,28 +48,26 @@ async def create_zhihu_agent(task: str):
     system_prompt = """
 你是一个知乎自动化 Agent，速度优先。
 
-⚠️ 任务执行顺序（严格按序，不可跳转）：
+⚠️ 任务执行流程（严格按序，不可跳转）：
 1. 登录知乎
-2. 写文章（标题 + LLM自创100字短文 + 配图）→ 发布
-3. 搜索刚发布的文章
-4. 评论 + 收藏
-5. 立即调用 done 结束
+2. 打开写文章 → 关创作助手弹窗 → 填标题/正文(input) → 配图(generate_and_insert_svg_image) → 发布
+3. 关闭发布成功弹窗 → **必须 navigate 回知乎首页** → 搜索已发布文章
+4. 找到文章 → 评论 + 收藏
+5. 立即 done
 
-知乎写文章页面固定流程（已知弹窗直接关，不犹豫）：
-- 进入 zhuanlan.zhihu.com/write 后等 2 秒，必弹「创作助手」→ 直接点 aria-label="关闭创作助手" 或找关闭按钮关掉
-- 关弹窗后填标题、input 正文、配图，然后找「发布」按钮发布
-- 发布后可能弹成功提示 → 直接关掉或忽略，不需要等待确认
-- 发布后页面 URL 会变（含文章 ID），记住这个 URL 或标题供搜索
+知乎已知固定流程：
+- 进 zhuanlan.zhihu.com/write → 等 2s → 关「创作助手」弹窗(aria-label="关闭创作助手")
+- 发布后会弹成功提示 → 点关闭按钮(aria-label="关闭")关掉
+- ⚠️ 关弹窗后还在文章编辑页！必须执行 navigate(url="https://www.zhihu.com") 回首页！
+- 回首页后找搜索框搜文章标题。搜不到就用 navigate 跳文章 URL
+- ⚠️ 严禁在 navigate 回首页/搜索之前做任何评论或收藏操作
 
 规则：
-- 直接使用基础操作（click/input/navigate/scroll/wait/evaluate）。
-- 文章由你自己创作（100字左右），标题和正文都用 input 填入。
-- 配图调 generate_and_insert_svg_image。
-- 遇到已知弹窗直接关，不要截图分析浪费步骤。
-- 必须先发布、再搜索、再评论收藏。
-- 全部任务完成后立即 done（success=true），不继续浏览。
+- 直接用 click/input/navigate/scroll/wait/evaluate。不要调 playbook 工具。
+- 文章 100 字左右，LLM 自创。
 - 遇到验证码/登录卡住 → ask_human_for_intervention。
 - 严禁自我点赞。禁止微信扫码登录。
+- 全完成后立即 done(success=true)，不继续浏览。
 """
 
     agent = Agent(
