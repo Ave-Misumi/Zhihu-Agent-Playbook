@@ -7,6 +7,7 @@ from config import get_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR
 from tools.playbook import get_playbook_selector, save_to_playbook, execute_playwright_action
 from tools.image_gen import generate_and_insert_svg_image
 from tools.human_in_loop import ask_human_for_intervention
+from tools.auto_memory import create_auto_memory_callback
 
 
 def create_custom_tools() -> Tools:
@@ -61,6 +62,13 @@ async def create_zhihu_agent(task: str):
     【知乎平台限制 - 必须遵守】：
     - 绝对不能给自己的文章/内容点赞，知乎会阻止此操作。看到「喜欢」按钮直接跳过。
     - 如果点赞失败或弹窗提示无法互动，不要重试，立即进入下一步。
+
+    【登录策略 - 严格禁止微信登录】：
+    - 禁止使用微信扫码登录。微信登录页面经常超时，不要选择「微信登录」。
+    - 登录方式优先级：Cookie 自动登录 > 手机验证码登录 > 密码登录。
+    - 知乎首页通常已有登录状态（本机 Cookie 已保存），直接进入即可，不要主动点登录按钮。
+    - 如果页面已经显示已登录状态（有头像、有「写文章」入口），直接开始执行任务。
+    - 如果必须登录，优先选择「手机验证码登录」或「密码登录」，绝对不要选微信登录。
     """
 
     agent = Agent(
@@ -72,5 +80,6 @@ async def create_zhihu_agent(task: str):
         max_steps=50,
         llm_timeout=180,
         use_vision=False,
+        register_new_step_callback=create_auto_memory_callback(),
     )
     return agent

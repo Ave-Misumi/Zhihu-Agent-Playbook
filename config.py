@@ -198,6 +198,9 @@ class BridgeLLM:
         "get_playbook_selector", "save_to_playbook",
         "execute_playwright_action", "generate_and_insert_svg_image",
         "ask_human_for_intervention",
+        # 常见 LLM 幻觉名称 → 自动映射到真实工具
+        "get_playwright_action",
+        "get_playwright_selector",
     }
     ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
 
@@ -384,6 +387,107 @@ class BridgeLLM:
         if text.strip().startswith("{"):
             return BridgeLLM._auto_close_json(text.strip())
         return text.strip()
+
+    @staticmethod
+    def _merge_duplicate_action_keys(text: str) -> str:
+        """修复 LLM 输出重复 \"action\" key 的问题
+
+        Qwen/GLM 有时会输出:
+          {"action":[...], "thinking":"...", ..., "action":[...]}
+        Python json.loads 只保留最后一个 action，通常是不完整的（只有部分字段）。
+        此处用正则提取所有 \"action\":[...] 数组，合并为一个。
+        """
+        # 查找所有 "action":[...] （嵌套括号计数）
+        action_arrays = []
+        for m in re.finditer(r'"action"\s*:\s*', text):
+            start = m.end()
+            if start >= len(text) or text[start] != '[':
+                continue
+            # 括号计数找匹配的 ]
+            depth = 0
+            in_str = False
+            esc = False
+            end = start
+            for i in range(start, len(text)):
+                ch = text[i]
+                if esc:
+                    esc = False
+                    continue
+                if ch == '\\':
+                    esc = True
+                    continue
+                if ch == '"' and not esc:
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == '[':
+                    depth += 1
+                elif ch == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            action_arrays.append(text[start:end])
+
+        if len(action_arrays) <= 1:
+            return text  # 没有重复，原样返回
+
+        # 合并所有 action 数组：[[a,b],[c]] → [a,b,c]
+        merged_items = []
+        for arr_str in action_arrays:
+            # 去掉首尾的 []
+            inner = arr_str[1:-1].strip()
+            if inner:
+                merged_items.append(inner)
+        merged_action = '[' + ', '.join(merged_items) + ']'
+
+        # 替换所有 "action":[...] 为单一的合并版，删除多余的
+        # 策略：找到第一个 "action" 出现位置，保留它 + 合并内容，删除后面所有的 "action" key
+        first_action_match = re.search(r'"action"\s*:\s*', text)
+        if not first_action_match:
+            return text
+
+        prefix = text[:first_action_match.start()]
+        # 从第一个 action 的 value 结束位置开始，找到后面的内容
+        first_arr_start = first_action_match.end()
+        # 找到第一个 [ 的匹配 ]
+        depth = 0
+        in_str = False
+        esc = False
+        first_arr_end = first_arr_start
+        for i in range(first_arr_start, len(text)):
+            ch = text[i]
+            if esc:
+                esc = False
+                continue
+            if ch == '\\':
+                esc = True
+                continue
+            if ch == '"' and not esc:
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    first_arr_end = i + 1
+                    break
+
+        suffix = text[first_arr_end:]
+
+        # 删除 suffix 中所有 "\"action\"\s*:\s*\[...]:...](?:[^\[\]]|\[[^\]]*\])*\]\s*,?\s*" 段
+        # 同时吸收前面可能残留的逗号
+        suffix = re.sub(r',?\s*"action"\s*:\s*\[(?:[^\[\]]|\[[^\]]*\])*\]\s*,?\s*', '', suffix)
+
+        # 清理末尾残留标点（trailing comma after last field）
+        suffix = re.sub(r',\s*}', '}', suffix)
+
+        result = prefix + '"action":' + merged_action + suffix
+        return result
 
     @staticmethod
     def _pre_repair_json(text: str) -> str:
@@ -618,6 +722,7 @@ class BridgeLLM:
             "ask_human_for_intervention",
             # 常见 LLM 幻觉名称 → 自动映射到真实工具
             "get_playwright_action",  # Qwen 常幻觉此名 → 映射为 get_playbook_selector
+            "get_playwright_selector",  # Qwen 另一常见幻觉名
         }
         ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
 
@@ -723,6 +828,19 @@ class BridgeLLM:
                 act = dict(act)
                 act["get_playbook_selector"] = mapped
                 print("[WARN] Mapped hallucinated get_playwright_action → get_playbook_selector")
+
+            # 10b) 幻觉工具名映射：get_playwright_selector → get_playbook_selector
+            if "get_playwright_selector" in act:
+                old_val = act.pop("get_playwright_selector")
+                mapped = {}
+                if isinstance(old_val, str):
+                    mapped["element_description"] = old_val
+                elif isinstance(old_val, dict):
+                    mapped["page_name"] = old_val.get("page_name", "")
+                    mapped["element_description"] = old_val.get("element_description", "")
+                act = dict(act)
+                act["get_playbook_selector"] = mapped
+                print("[WARN] Mapped hallucinated get_playwright_selector → get_playbook_selector")
 
             # 9) 修复 ask_human_for_intervention: Qwen 常输出字符串而非 {reason:...}
             if "ask_human_for_intervention" in act:
@@ -835,6 +953,11 @@ class BridgeLLM:
                 return output_format.model_validate(data)
 
         candidate = BridgeLLM._extract_json_candidate(text)
+
+        # 1a) 修复重复 "action" key：LLM (Qwen/GLM) 有时输出两个 action 字段
+        #      Python json.loads 只保留最后一个，通常是不完整的
+        #      检测并合并所有 action 数组
+        candidate = BridgeLLM._merge_duplicate_action_keys(candidate)
 
         # 1) 预修复：修复 GLM-5.1 奇葩 JSON 语法
         candidate = BridgeLLM._pre_repair_json(candidate)
