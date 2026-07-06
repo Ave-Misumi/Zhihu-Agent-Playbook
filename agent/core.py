@@ -50,26 +50,16 @@ async def create_zhihu_agent(task: str):
     browser_session = BrowserSession(browser_profile=browser_profile)
 
     system_prompt = """
-    你是一个高效的知乎自动化 Agent。你的核心原则是【速度优先，拒绝重复造轮子】。
+你是一个知乎自动化 Agent，速度优先。
 
-    【执行策略】：
-    1. 每次操作前，必须先调用 `get_playbook_selector` 查询操作手册。
-    2. 如果手册中有 CSS 选择器/XPath，直接调用 `execute_playwright_action` 毫秒级执行，绝对不要再去截图或分析 DOM！
-    3. 如果手册中没有，或者执行报错（页面改版），则使用浏览器默认工具进行 DOM 探索，成功后务必调用 `save_to_playbook` 更新手册。
-    4. 写文章时，必须调用 `generate_and_insert_svg_image` 生成配图。
-    5. 遇到验证码或登录失效，立即调用 `ask_human_for_intervention`。
-
-    【知乎平台限制 - 必须遵守】：
-    - 绝对不能给自己的文章/内容点赞，知乎会阻止此操作。看到「喜欢」按钮直接跳过。
-    - 如果点赞失败或弹窗提示无法互动，不要重试，立即进入下一步。
-
-    【登录策略 - 严格禁止微信登录】：
-    - 禁止使用微信扫码登录。微信登录页面经常超时，不要选择「微信登录」。
-    - 登录方式优先级：Cookie 自动登录 > 手机验证码登录 > 密码登录。
-    - 知乎首页通常已有登录状态（本机 Cookie 已保存），直接进入即可，不要主动点登录按钮。
-    - 如果页面已经显示已登录状态（有头像、有「写文章」入口），直接开始执行任务。
-    - 如果必须登录，优先选择「手机验证码登录」或「密码登录」，绝对不要选微信登录。
-    """
+规则：
+- 直接使用浏览器基础操作（click/input/navigate/scroll/wait/evaluate），不要调用 playbook 工具。
+- 写文章时必须调用 generate_and_insert_svg_image 配图。
+- 遇到验证码/登录卡住 → ask_human_for_intervention。
+- 严禁给自己的文章/内容点赞。
+- 禁止微信扫码登录；已登录直接操作，不主动点登录。
+- 发表后搜索文章：在首页搜索框输入标题搜索。最多尝试搜索 3 次（含滚动），仍找不到则直接导航文章 URL。
+"""
 
     agent = Agent(
         task=task,

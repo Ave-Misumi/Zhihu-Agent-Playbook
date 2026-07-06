@@ -155,13 +155,32 @@ def _build_selector(node: Any) -> str | None:
 def _is_valuable_element(node: Any) -> bool:
     """判断元素是否有记录价值（交互元素 + 有语义标签）"""
     tag = getattr(node, "node_name", "").lower().strip()
-    if tag not in ("a", "button", "input", "textarea", "select", "span", "div", "li"):
+    if tag not in ("a", "button", "input", "textarea", "select"):
         return False
 
     attrs = getattr(node, "attributes", {}) or {}
 
     # 必须有 aria-label 或 placeholder 或 role
-    if attrs.get("aria-label", "").strip():
+    aria = attrs.get("aria-label", "").strip()
+    if aria:
+        # 过滤噪音标签：单字/纯数字/纯拼音/表情/短通用词
+        NOISE_LABELS = {
+            "关闭", "返回", "更多", "分享", "举报", "删除", "编辑", "收", "上移", "下移",
+            "点赞", "喜欢", "关注", "取消关注", "收藏", "内容管理",
+            "消息", "私信", "通知", "首页", "搜索", "设置", "退出",
+            "写文章",  # 这个是真正有用的保留
+            "创建", "新建", "发布", "提交", "取消", "确定",
+            "上一页", "下一页", "加载更多",
+            "复制", "粘贴", "全选", "撤销", "重做",
+            "播放", "暂停", "静音", "音量",
+            "展开", "收起", "折叠",
+        }
+        USEFUL_NOISE = {"写文章", "发布文章", "保存草稿", "预览", "插入链接", "插入图片", "插入视频"}
+        if aria in NOISE_LABELS and aria not in USEFUL_NOISE:
+            return False
+        # aria-label 必须 ≥2 个中文字符才记录
+        if len([c for c in aria if '\u4e00' <= c <= '\u9fff']) < 2:
+            return False
         return True
     if attrs.get("placeholder", "").strip():
         return True
