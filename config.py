@@ -197,6 +197,7 @@ class BridgeLLM:
         "get_playbook_selector",
         "execute_playwright_action", "generate_and_insert_svg_image",
         "ask_human_for_intervention",
+        "wps_create_document_and_export_pdf",
         # 常见 LLM 幻觉名称 → 自动映射到真实工具
         "get_playwright_action",
         "get_playwright_selector",
@@ -719,6 +720,7 @@ class BridgeLLM:
             "get_playbook_selector",
             "execute_playwright_action", "generate_and_insert_svg_image",
             "ask_human_for_intervention",
+            "wps_create_document_and_export_pdf",
             # 常见 LLM 幻觉名称 → 自动映射到真实工具
             "get_playwright_action",  # Qwen 常幻觉此名 → 映射为 get_playbook_selector
             "get_playwright_selector",  # Qwen 另一常见幻觉名
