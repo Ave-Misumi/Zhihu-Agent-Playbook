@@ -8,6 +8,7 @@ from tools.playbook import get_playbook_selector, execute_playwright_action
 from tools.image_gen import generate_and_insert_svg_image
 from tools.human_in_loop import ask_human_for_intervention
 from tools.auto_memory import create_auto_memory_callback
+from tools.wps import wps_create_document_and_export_pdf
 
 
 def create_custom_tools() -> Tools:
@@ -29,6 +30,10 @@ def create_custom_tools() -> Tools:
     tools.registry.action(
         description="当遇到验证码、需要扫码登录或页面出现未知异常时，调用此工具暂停程序，等待人工干预。"
     )(ask_human_for_intervention)
+
+    tools.registry.action(
+        description="启动 WPS Windows 客户端，新建文字文档，写入标题和正文（支持 Markdown），设置字体/段落/编号格式，保存 .docx 并导出 PDF。完成后返回文件路径。不占用浏览器。"
+    )(wps_create_document_and_export_pdf)
 
     return tools
 
@@ -80,5 +85,53 @@ async def create_zhihu_agent(task: str):
         llm_timeout=180,
         use_vision=False,
         register_new_step_callback=create_auto_memory_callback(),
+    )
+    return agent
+
+
+async def create_wps_agent(task: str):
+    """WPS 链路 Agent：用户自然语言驱动，不走浏览器。
+
+    Agent 理解用户需求后调用 wps_create_document_and_export_pdf 完成全部操作。
+    浏览器仅占位（headless + about:blank），WPS 操作完全通过 COM 在本地执行。
+    """
+    # 只注册 WPS 工具，不注册浏览器相关工具
+    wps_tools = Tools()
+    wps_tools.registry.action(
+        description="启动 WPS Windows 客户端，新建文字文档，写入标题和正文（支持 Markdown），设置字体/段落/编号格式，保存 .docx 并导出 PDF。完成后返回文件路径。这是唯一可用的工具。"
+    )(wps_create_document_and_export_pdf)
+
+    # 最小化 headless 浏览器占位
+    browser_profile = BrowserProfile(
+        executable_path=EDGE_EXECUTABLE_PATH,
+        user_data_dir=EDGE_USER_DATA_DIR,
+        headless=True,
+        args=["--disable-blink-features=AutomationControlled", "--window-size=1,1"]
+    )
+    browser_session = BrowserSession(browser_profile=browser_profile)
+
+    system_prompt = """
+你是 WPS 文档助手。用户会用自然语言描述想要的文章，你需要：
+1. 理解用户意图 → 提炼出标题和正文内容
+2. 调用 wps_create_document_and_export_pdf 一次性完成
+3. 完成后立即 done(success=true)
+
+⚠️ 重要：
+- 不要操作浏览器！不要 navigate/click/input。唯一的工具是 wps_create_document_and_export_pdf。
+- title 用纯文本，body_md 用 Markdown 格式（## 二级标题、- 列表、**粗体**）。
+- 正文要内容充实、结构清晰，至少包含 2~3 个小节。
+- 从用户的话里提炼主题和要点，不要机械复制。
+- 一步完成 wps 操作后立刻 done。
+"""
+
+    agent = Agent(
+        task=task,
+        llm=get_llm(),
+        browser_session=browser_session,
+        tools=wps_tools,
+        extend_system_message=system_prompt,
+        max_steps=5,
+        llm_timeout=120,
+        use_vision=False,
     )
     return agent
