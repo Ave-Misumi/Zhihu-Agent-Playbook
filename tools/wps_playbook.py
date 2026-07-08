@@ -51,24 +51,66 @@ def _extract_skeleton(body_md: str) -> list[str]:
     return skeleton
 
 
-# ── 模板类型识别 ──
+# ── 模板类型识别（标题优先 → 结构特征 → 关键词兜底） ──
 
 def _guess_template_type(title: str, body_md: str) -> str:
-    """从标题和正文推断文档类型"""
-    combined = f"{title}\n{body_md}"
-    patterns = {
-        "周报":    ["周报", "本周", "下周", "进展", "工作总结"],
-        "会议纪要": ["会议", "纪要", "参会", "议题", "决议"],
-        "报告":    ["报告", "调研", "分析", "评估", "研究"],
-        "通知":    ["通知", "公告", "通告", "须知"],
-        "简历":    ["简历", "履历", "求职", "应聘"],
-        "计划":    ["计划", "规划", "方案", "路线图"],
-        "总结":    ["总结", "回顾", "复盘", "年度", "季度"],
-        "文章":    [],  # fallback
-    }
-    for ttype, keywords in patterns.items():
-        if any(kw in combined for kw in keywords):
-            return ttype
+    """从标题和正文推断文档类型。
+
+    分四步（按优先级）：
+    1. 标题行政类型词 → 直接返回（周报/会议纪要/通知/简历/计划/总结）
+    2. 标题文章型标志词 → 直接返回「文章」（趋势/浅谈/如何/指南/展望 等，排在报告之前）
+    3. 标题报告型词（纯管理报告，不含文章词时）
+    4. 首段结构特征 + 章节标题兜底（不再搜全文，避免技术文章误判）
+    """
+    # ── 提取章节标题 ──
+    section_heads = "\n".join(
+        line.strip() for line in body_md.split("\n")
+        if re.match(r"^##\s", line.strip()) or re.match(r"^(?:[一二三四五六七八九十]+)[、.．]", line.strip())
+    )
+
+    # ── 第一步：标题行政类型词 ──
+    if re.search(r"周报", title):
+        return "周报"
+    if re.search(r"(会议|纪要)", title):
+        return "会议纪要"
+    if re.search(r"(通知|公告|通告)", title):
+        return "通知"
+    if re.search(r"简历|履历|求职", title):
+        return "简历"
+    if re.search(r"(计划|规划|方案|路线图)", title):
+        return "计划"
+    if re.search(r"(总结|回顾|复盘)", title):
+        return "总结"
+
+    # ── 第二步：标题文章型标志词（排在报告之前） ──
+    # 这些词表明这是一篇分析/思考类文章，不是行政报告
+    # 即使标题同时含「报告」（如"趋势报告"），也以文章型为优先
+    if re.search(r"(趋势|发展|分析|深入|如何|指南|浅谈|浅析|探讨|展望|思考|解读|观察|洞察|变革|演进)", title):
+        return "文章"
+
+    # ── 第三步：标题报告型词（纯管理报告） ──
+    if re.search(r"(报告|调研|评估|研究)", title):
+        return "报告"
+
+    # ── 第四步：首段结构特征 + 章节标题兜底 ──
+    head = body_md[:500]
+    if re.search(r"(时间[：:]|地点[：:]|参会[：:]|议题[：:]|主持人[：:]|记录人[：:])", head):
+        return "会议纪要"
+    if re.search(r"(本周|上周|下周)", head) and re.search(r"(进展|完成|计划|工作)", head):
+        return "周报"
+    if re.search(r"(各位|各部门|特此|根据.*规定|经.*决定)", head):
+        return "通知"
+
+    # 章节标题兜底（只匹配章节标题，避免正文中的普通词触发误判）
+    if "会议" in section_heads:
+        return "会议纪要"
+    if "计划" in section_heads:
+        return "计划"
+    if "总结" in section_heads:
+        return "总结"
+    if "报告" in section_heads:
+        return "报告"
+
     return "文章"
 
 
@@ -120,12 +162,18 @@ async def get_wps_template(
     查询 WPS 文档模板缓存。
 
     返回 JSON：命中 → 含 formatting(排版参数) + example_skeleton(章节骨架)
-            未命中 → {"status":"no_template","message":"无缓存模板，请使用用户指定的排版参数(或默认黑体小二/小三/宋体小四 28磅行距)直接创作。"}
+            未命中 → {"status":"no_template","message":"..."}
     """
     templates = _load_templates()
     tmpl = templates.get(template_type)
     if tmpl:
+        fmt = tmpl.get("formatting", {})
+        skeleton = tmpl.get("example_skeleton", [])
+        print(f"[WPS-PLAYBOOK] HIT  template_type={template_type} | "
+              f"formatting={fmt.get('title_font')} {fmt.get('title_size')}/{fmt.get('body_font')} {fmt.get('body_size')}/{fmt.get('line_spacing')}pt | "
+              f"skeleton={len(skeleton)} sections | updated={tmpl.get('updated')}")
         return json.dumps(tmpl, ensure_ascii=False, indent=2)
+    print(f"[WPS-PLAYBOOK] MISS template_type={template_type} | returning guidance to create from scratch")
     return json.dumps({
         "status": "no_template",
         "message": '没有"' + template_type + '"类型的缓存模板。请使用用户指定的排版参数从头创作。默认：标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅。'
@@ -150,5 +198,7 @@ def auto_save_wps_template(
                        title_font, title_size,
                        heading_font, heading_size,
                        body_font, body_size, line_spacing)
+        print(f"[WPS-PLAYBOOK] SAVED template_type={tt} | "
+              f"formatting={title_font} {title_size}/{body_font} {body_size}/{line_spacing}pt")
     except Exception:
         pass  # 静默失败，不影响主流程
