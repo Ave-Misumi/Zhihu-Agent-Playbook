@@ -191,8 +191,6 @@ def _parse_body_md(body: str):
     for line in lines:
         line = line.rstrip()
         if not line:
-            # 空行：插入一个空段（当作普通段落），使 Markdown 段落间距得以呈现
-            result.append(("para", "", set()))
             continue
 
         # ## 或 ### 标题
@@ -232,7 +230,15 @@ def _ensure_new_paragraph(doc):
     end = doc.Range(doc.Content.End - 1, doc.Content.End)
     end.Collapse(wdCollapseEnd)          # 折叠到文档尾
     end.InsertParagraphAfter()           # 插入空 ¶
-    # 光标现在落在新段落开头，后续 _format_* 将操作 Paragraphs.Last
+    # 新段落可能从上一段继承了居中/段间距等 → 全部重置
+    last = doc.Paragraphs.Last
+    pf = last.Format
+    pf.Alignment         = 0   # wdAlignParagraphLeft
+    pf.SpaceBefore       = 0
+    pf.SpaceAfter        = 0
+    pf.LineSpacingRule   = 0   # wdLineSpaceSingle
+    pf.FirstLineIndent   = 0
+    pf.LeftIndent        = 0
 
 
 def _format_heading(doc, text: str, font: str, size: float,
