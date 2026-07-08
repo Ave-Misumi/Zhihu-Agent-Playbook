@@ -155,7 +155,6 @@ class BridgeLLM:
                         "dropdown_options(index), select_dropdown(index,text), search_page(query), "
                         "save_as_pdf(path), upload_file(index,path), replace_file(file_name,content), "
                         "get_playbook_selector(page_name,element_description), "
-                        "save_to_playbook(page_name,selector,action,description), "
                         "execute_playwright_action(selector,action,value?), "
                         "generate_and_insert_svg_image(article_topic), "
                         "ask_human_for_intervention(reason).\n"
@@ -195,9 +194,12 @@ class BridgeLLM:
     }
     # 自定义 tool key 白名单（来自 tools/ 注册）
     CUSTOM_KEYS = {
-        "get_playbook_selector", "save_to_playbook",
+        "get_playbook_selector",
         "execute_playwright_action", "generate_and_insert_svg_image",
         "ask_human_for_intervention",
+        # 常见 LLM 幻觉名称 → 自动映射到真实工具
+        "get_playwright_action",
+        "get_playwright_selector",
     }
     ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
 
@@ -386,6 +388,107 @@ class BridgeLLM:
         return text.strip()
 
     @staticmethod
+    def _merge_duplicate_action_keys(text: str) -> str:
+        """修复 LLM 输出重复 \"action\" key 的问题
+
+        Qwen/GLM 有时会输出:
+          {"action":[...], "thinking":"...", ..., "action":[...]}
+        Python json.loads 只保留最后一个 action，通常是不完整的（只有部分字段）。
+        此处用正则提取所有 \"action\":[...] 数组，合并为一个。
+        """
+        # 查找所有 "action":[...] （嵌套括号计数）
+        action_arrays = []
+        for m in re.finditer(r'"action"\s*:\s*', text):
+            start = m.end()
+            if start >= len(text) or text[start] != '[':
+                continue
+            # 括号计数找匹配的 ]
+            depth = 0
+            in_str = False
+            esc = False
+            end = start
+            for i in range(start, len(text)):
+                ch = text[i]
+                if esc:
+                    esc = False
+                    continue
+                if ch == '\\':
+                    esc = True
+                    continue
+                if ch == '"' and not esc:
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == '[':
+                    depth += 1
+                elif ch == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            action_arrays.append(text[start:end])
+
+        if len(action_arrays) <= 1:
+            return text  # 没有重复，原样返回
+
+        # 合并所有 action 数组：[[a,b],[c]] → [a,b,c]
+        merged_items = []
+        for arr_str in action_arrays:
+            # 去掉首尾的 []
+            inner = arr_str[1:-1].strip()
+            if inner:
+                merged_items.append(inner)
+        merged_action = '[' + ', '.join(merged_items) + ']'
+
+        # 替换所有 "action":[...] 为单一的合并版，删除多余的
+        # 策略：找到第一个 "action" 出现位置，保留它 + 合并内容，删除后面所有的 "action" key
+        first_action_match = re.search(r'"action"\s*:\s*', text)
+        if not first_action_match:
+            return text
+
+        prefix = text[:first_action_match.start()]
+        # 从第一个 action 的 value 结束位置开始，找到后面的内容
+        first_arr_start = first_action_match.end()
+        # 找到第一个 [ 的匹配 ]
+        depth = 0
+        in_str = False
+        esc = False
+        first_arr_end = first_arr_start
+        for i in range(first_arr_start, len(text)):
+            ch = text[i]
+            if esc:
+                esc = False
+                continue
+            if ch == '\\':
+                esc = True
+                continue
+            if ch == '"' and not esc:
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    first_arr_end = i + 1
+                    break
+
+        suffix = text[first_arr_end:]
+
+        # 删除 suffix 中所有 "\"action\"\s*:\s*\[...]:...](?:[^\[\]]|\[[^\]]*\])*\]\s*,?\s*" 段
+        # 同时吸收前面可能残留的逗号
+        suffix = re.sub(r',?\s*"action"\s*:\s*\[(?:[^\[\]]|\[[^\]]*\])*\]\s*,?\s*', '', suffix)
+
+        # 清理末尾残留标点（trailing comma after last field）
+        suffix = re.sub(r',\s*}', '}', suffix)
+
+        result = prefix + '"action":' + merged_action + suffix
+        return result
+
+    @staticmethod
     def _pre_repair_json(text: str) -> str:
         """预修复 GLM-5.1 独有的 JSON 语法错误（json_repair 也修不了的）
         
@@ -534,7 +637,7 @@ class BridgeLLM:
             'send_keys', 'find_elements', 'find_text', 'switch', 'close', 'go_back',
             'wait', 'upload_file', 'search_page', 'save_as_pdf', 'dropdown_options',
             'select_dropdown', 'write_file', 'replace_file', 'read_file', 'evaluate',
-            'screenshot', 'get_playbook_selector', 'save_to_playbook',
+            'screenshot', 'get_playbook_selector',
             'execute_playwright_action', 'generate_and_insert_svg_image',
             'ask_human_for_intervention'
         }
@@ -613,11 +716,12 @@ class BridgeLLM:
         }
         # 自定义 tool key 白名单（来自 tools/ 注册）
         CUSTOM_KEYS = {
-            "get_playbook_selector", "save_to_playbook",
+            "get_playbook_selector",
             "execute_playwright_action", "generate_and_insert_svg_image",
             "ask_human_for_intervention",
             # 常见 LLM 幻觉名称 → 自动映射到真实工具
             "get_playwright_action",  # Qwen 常幻觉此名 → 映射为 get_playbook_selector
+            "get_playwright_selector",  # Qwen 另一常见幻觉名
         }
         ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
 
@@ -630,9 +734,30 @@ class BridgeLLM:
 
         cleaned = []
         for act in actions:
+            # 0) 裸字符串 action（如 LLM 输出 ["wait(3)"] 被截断）→ 尝试转为 dict
+            if isinstance(act, str):
+                act_str = act.strip()
+                # 匹配 wait(N) / wait 3
+                wait_m = re.match(r'wait\s*\(?\s*(\d+)\s*\)?', act_str)
+                if wait_m:
+                    cleaned.append({"wait": {"seconds": int(wait_m.group(1))}})
+                    print(f"[WARN] Converted string action '{act_str}' → wait")
+                    continue
+                # 匹配 done(text=..., success=...)
+                if act_str.startswith('done'):
+                    cleaned.append({"done": {"text": act_str, "success": True}})
+                    print(f"[WARN] Converted string action '{act_str[:40]}' → done")
+                    continue
+                # 兜底：当 wait(1) 处理
+                cleaned.append({"wait": {"seconds": 1}})
+                print(f"[WARN] Unrecognized string action '{act_str[:40]}', defaulted to wait(1)")
+                continue
+
             if not isinstance(act, dict):
                 cleaned.append(act)
                 continue
+
+            # (removed: evaluate→paste_article_body, input→paste_article_body — paste is deprecated)
 
             # 1) {"screenshot": {}} → 替换为短暂 wait（避免 Agent 提前终止）
             if set(act.keys()) == {"screenshot"}:
@@ -673,6 +798,25 @@ class BridgeLLM:
                 act = dict(act)
                 act["wait"] = {"seconds": int(seconds)}
 
+            # 6b) 修复 scroll：Qwen 常输出 {"scroll": 300} 裸整数，需转为 {"scroll": {"amount": 300}}
+            #     browser-use 只接受 {"scroll": {"amount": N}} 格式
+            if "scroll" in act:
+                if isinstance(act["scroll"], (int, float)):
+                    act = dict(act)
+                    act["scroll"] = {"amount": int(act["scroll"])}
+                    print(f"[WARN] Auto-wrapped scroll int → {{amount: {act['scroll']['amount']}}}")
+                elif isinstance(act["scroll"], dict):
+                    inner = act["scroll"]
+                    if "pixels" in inner:
+                        # Qwen 常见：{"scroll": {"pixels": 500}} → {"scroll": {"amount": 500}}
+                        act = dict(act)
+                        act["scroll"] = {"amount": int(inner["pixels"])}
+                        print(f"[WARN] Auto-converted scroll pixels → amount ({act['scroll']['amount']})")
+                    elif "amount" not in inner:
+                        act = dict(act)
+                        act["scroll"] = {"amount": 300}
+                        print("[WARN] scroll missing amount, defaulted to 300")
+
             # 7) 修复 switch 的 tab_index → tab_id，且强制 tab_id 为字符串
             if "switch" in act and isinstance(act["switch"], dict):
                 inner = dict(act["switch"])
@@ -702,12 +846,13 @@ class BridgeLLM:
 
             # 9) 修复 switch tab_id 格式：真实 CDP ID 固定 4 位十六进制，不是 4 位的全替换
             #    int→str 得 "0"（太短）、科学计数法 56E6→"56000000.0"（太长）都无效
+            #    改用 wait(1) 兜底，避免 navigate 导致页面重新加载→LLM 再次尝试切 tab 的循环
             if "switch" in act and isinstance(act["switch"], dict):
                 inner = act["switch"]
                 tab_id_val = inner.get("tab_id", "")
                 if isinstance(tab_id_val, str) and len(tab_id_val) != 4:
-                    act = {"navigate": {"url": "https://www.zhihu.com", "new_tab": False}}
-                    print(f"[WARN] Replaced switch(tab_id='{tab_id_val}', len={len(tab_id_val)}) → navigate")
+                    act = {"wait": {"seconds": 1}}
+                    print(f"[WARN] Replaced switch(tab_id='{tab_id_val}', len={len(tab_id_val)}) → wait(1)")
 
             # 10) LLM 幻觉工具名映射：Qwen 常见幻觉 → 真实工具
             # get_playwright_action → get_playbook_selector
@@ -723,6 +868,19 @@ class BridgeLLM:
                 act = dict(act)
                 act["get_playbook_selector"] = mapped
                 print("[WARN] Mapped hallucinated get_playwright_action → get_playbook_selector")
+
+            # 10b) 幻觉工具名映射：get_playwright_selector → get_playbook_selector
+            if "get_playwright_selector" in act:
+                old_val = act.pop("get_playwright_selector")
+                mapped = {}
+                if isinstance(old_val, str):
+                    mapped["element_description"] = old_val
+                elif isinstance(old_val, dict):
+                    mapped["page_name"] = old_val.get("page_name", "")
+                    mapped["element_description"] = old_val.get("element_description", "")
+                act = dict(act)
+                act["get_playbook_selector"] = mapped
+                print("[WARN] Mapped hallucinated get_playwright_selector → get_playbook_selector")
 
             # 9) 修复 ask_human_for_intervention: Qwen 常输出字符串而非 {reason:...}
             if "ask_human_for_intervention" in act:
@@ -749,6 +907,36 @@ class BridgeLLM:
                 unknown = act_keys - ALL_KNOWN_KEYS
                 act = {k: v for k, v in act.items() if k in ALL_KNOWN_KEYS}
                 print(f"[WARN] Removed unknown keys: {unknown}")
+
+            # 11) 修复 get_playbook_selector 缺 element_description：Qwen 有时只传 page_name
+            if "get_playbook_selector" in act:
+                inner = act["get_playbook_selector"]
+                if isinstance(inner, dict) and "element_description" not in inner:
+                    # 用 page_name 生成一个合理的描述
+                    page = inner.get("page_name", "")
+                    inner = dict(inner)
+                    inner["element_description"] = f"主要操作元素 at {page}" if page else "页面元素"
+                    act = dict(act)
+                    act["get_playbook_selector"] = inner
+                    print(f"[WARN] Auto-filled get_playbook_selector.element_description")
+
+            # 12) 修复 input 缺 text：Qwen 有时只传 index
+            if "input" in act and isinstance(act["input"], dict):
+                inner = act["input"]
+                if "text" not in inner and "index" in inner:
+                    inner = dict(inner)
+                    inner["text"] = " "  # browser-use 不接受空字符串，用空格兜底
+                    act = dict(act)
+                    act["input"] = inner
+                    print("[WARN] Auto-filled input.text with default")
+
+            # 12b) 修复 generate_and_insert_svg_image 裸字符串：Qwen 常输出字符串而非 dict
+            if "generate_and_insert_svg_image" in act:
+                inner = act["generate_and_insert_svg_image"]
+                if isinstance(inner, str):
+                    act = dict(act)
+                    act["generate_and_insert_svg_image"] = {"article_topic": inner}
+                    print("[WARN] Auto-wrapped generate_and_insert_svg_image string → dict")
 
             # 6) 修复 execute_playwright_action：确保有 selector 字段
             if "execute_playwright_action" in act:
@@ -804,14 +992,14 @@ class BridgeLLM:
         return data
 
     @staticmethod
-    def _make_default_output(output_format, msg: str = "Navigating as fallback") -> Any:
+    def _make_default_output(output_format, msg: str = "Waiting as fallback") -> Any:
         """构造默认兜底输出"""
         data = {
-            'action': [{'navigate': {'url': 'https://www.zhihu.com', 'new_tab': False}}],
+            'action': [{'wait': {'seconds': 2}}],
             'thinking': msg,
             'evaluation_previous_goal': '',
             'memory': '',
-            'next_goal': 'Navigate to Zhihu'
+            'next_goal': 'Wait and observe'
         }
         return output_format.model_validate(data)
 
@@ -820,7 +1008,7 @@ class BridgeLLM:
         """从 LLM 文本回复中提取 JSON 并用 Pydantic 模型校验"""
         # 处理空响应
         if not text or not text.strip():
-            print("[WARN] LLM returned empty response, injecting default navigate")
+            print("[WARN] LLM returned empty response, injecting default wait")
             return BridgeLLM._make_default_output(output_format, "Auto-recovered from empty LLM response")
 
         # 调试：打印 LLM 原始回复的前 800 字符
@@ -836,6 +1024,11 @@ class BridgeLLM:
 
         candidate = BridgeLLM._extract_json_candidate(text)
 
+        # 1a) 修复重复 "action" key：LLM (Qwen/GLM) 有时输出两个 action 字段
+        #      Python json.loads 只保留最后一个，通常是不完整的
+        #      检测并合并所有 action 数组
+        candidate = BridgeLLM._merge_duplicate_action_keys(candidate)
+
         # 1) 预修复：修复 GLM-5.1 奇葩 JSON 语法
         candidate = BridgeLLM._pre_repair_json(candidate)
 
@@ -846,7 +1039,20 @@ class BridgeLLM:
             return BridgeLLM._make_default_output(output_format, "Auto-recovered from unparseable JSON")
 
         if not isinstance(data, dict):
-            print(f"[WARN] LLM returned non-dict ({type(data).__name__}), injecting default navigate")
+            # 特殊兜底：如果解析结果是 list（如 LLM 输出 ["wait(3)] 截断）
+            # 尝试把 list 当作 action 注入到默认 dict
+            if isinstance(data, list) and data:
+                print(f"[WARN] LLM returned list, attempting to inject as action")
+                data = {
+                    "action": data,
+                    "thinking": "Recovered from list output",
+                    "evaluation_previous_goal": "",
+                    "memory": "",
+                    "next_goal": ""
+                }
+                data = BridgeLLM._sanitize_actions(data)
+                return output_format.model_validate(data)
+            print(f"[WARN] LLM returned non-dict ({type(data).__name__}), injecting default wait")
             return BridgeLLM._make_default_output(output_format, "Auto-recovered from non-dict response")
 
         # 清理 action 格式（修复 GLM-5.1 常见的格式偏差）
@@ -854,19 +1060,19 @@ class BridgeLLM:
 
         # 如果没有有效的 action，注入一个合理的默认动作
         if not isinstance(data.get('action'), list) or not data['action']:
-            print("[WARN] No valid actions in LLM output, injecting default: navigate to zhihu")
-            data['action'] = [{"navigate": {"url": "https://www.zhihu.com", "new_tab": False}}]
+            print("[WARN] No valid actions in LLM output, injecting default: wait(2)")
+            data['action'] = [{"wait": {"seconds": 2}}]
             if not data.get('thinking'):
-                data['thinking'] = 'Navigating to Zhihu as default action'
+                data['thinking'] = 'Waiting to observe page state'
             if not data.get('evaluation_previous_goal'):
                 data['evaluation_previous_goal'] = ''
             if not data.get('memory'):
                 data['memory'] = ''
             if not data.get('next_goal'):
-                data['next_goal'] = 'Navigate to Zhihu'
+                data['next_goal'] = 'Wait and observe page state'
         elif not any(isinstance(a, dict) and a for a in data['action']):
-            print("[WARN] All actions empty, injecting default: navigate to zhihu")
-            data['action'] = [{"navigate": {"url": "https://www.zhihu.com", "new_tab": False}}]
+            print("[WARN] All actions empty, injecting default: wait(2)")
+            data['action'] = [{"wait": {"seconds": 2}}]
 
         try:
             return output_format.model_validate(data)
@@ -901,7 +1107,7 @@ def get_llm():
         temperature=0.3,
         timeout=180,
         max_retries=2,
-        max_tokens=4096,
+        max_tokens=8192,
     )
     return BridgeLLM(inner)
 
