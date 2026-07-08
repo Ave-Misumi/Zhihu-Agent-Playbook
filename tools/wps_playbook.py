@@ -117,17 +117,19 @@ async def get_wps_template(
     template_type: str,
 ) -> str:
     """
-    查询特定类型的 WPS 文档模板缓存（排版参数 + 内容结构骨架）。
+    查询 WPS 文档模板缓存。
 
-    参数:
-        template_type: 文档类型，如 "周报"、"会议纪要"、"报告"、"通知"、"计划"、"总结"、"简历"、"文章"
-
-    返回: 模板信息（JSON 文本），包含上次使用的排版参数和章节结构。
-          未命中返回空对象 "{}"。
+    返回 JSON：命中 → 含 formatting(排版参数) + example_skeleton(章节骨架)
+            未命中 → {"status":"no_template","message":"无缓存模板，请使用用户指定的排版参数(或默认黑体小二/小三/宋体小四 28磅行距)直接创作。"}
     """
     templates = _load_templates()
-    tmpl = templates.get(template_type, {})
-    return json.dumps(tmpl, ensure_ascii=False, indent=2)
+    tmpl = templates.get(template_type)
+    if tmpl:
+        return json.dumps(tmpl, ensure_ascii=False, indent=2)
+    return json.dumps({
+        "status": "no_template",
+        "message": '没有"' + template_type + '"类型的缓存模板。请使用用户指定的排版参数从头创作。默认：标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅。'
+    }, ensure_ascii=False)
 
 
 def auto_save_wps_template(
