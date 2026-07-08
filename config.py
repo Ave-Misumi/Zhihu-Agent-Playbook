@@ -198,6 +198,7 @@ class BridgeLLM:
         "execute_playwright_action", "generate_and_insert_svg_image",
         "ask_human_for_intervention",
         "wps_create_document_and_export_pdf",
+        "get_wps_template",
         "wechat_search_and_follow", "wechat_send_message",
         # 常见 LLM 幻觉名称 → 自动映射到真实工具
         "get_playwright_action",
@@ -722,6 +723,7 @@ class BridgeLLM:
             "execute_playwright_action", "generate_and_insert_svg_image",
             "ask_human_for_intervention",
             "wps_create_document_and_export_pdf",
+            "get_wps_template",
             "wechat_search_and_follow", "wechat_send_message",
             # 常见 LLM 幻觉名称 → 自动映射到真实工具
             "get_playwright_action",  # Qwen 常幻觉此名 → 映射为 get_playbook_selector
