@@ -13,6 +13,7 @@ import time
 import pythoncom
 import win32com.client
 from browser_use.tools.service import ActionResult
+from tools.wps_playbook import auto_save_wps_template
 
 # ═══════════════════════════════════════════════
 # 中文字号 → pt
@@ -146,6 +147,11 @@ async def wps_create_document_and_export_pdf(
         time.sleep(0.5)
         doc.ExportAsFixedFormat(pdf_path, ExportFormat=wdExportFormatPDF)
         doc.Close(SaveChanges=False)
+
+        # 保存模板到 playbook（下次同类任务直接复用排版参数）
+        auto_save_wps_template(title, body_md, title_font, title_size,
+                               heading_font, heading_size,
+                               body_font, body_size, line_spacing)
 
         return ActionResult(
             extracted_content=(
