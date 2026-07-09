@@ -33,15 +33,15 @@ WECHAT_KEYWORDS = [
 
 def _route_intent(text: str) -> str:
     """返回 "zhihu" | "wps" | "wechat" """
-    # 知乎特征词 → 优先
-    if any(kw in text for kw in ["知乎", "zhihu", "浏览", "搜索", "评论", "收藏", "点赞"]):
-        return "zhihu"
-    # 微信特征词
-    if any(kw in text for kw in WECHAT_KEYWORDS):
+    # 微信特征词 → 优先（「搜索微信xxx」不能因为「搜索」被路由到知乎）
+    if any(kw in text for kw in WECHAT_KEYWORDS) and any(kw in text for kw in ["微信", "wechat", "WeChat"]):
         return "wechat"
     # WPS 特征词
     if any(kw in text for kw in WPS_KEYWORDS):
         return "wps"
+    # 知乎特征词
+    if any(kw in text for kw in ["知乎", "zhihu", "浏览", "搜索", "评论", "收藏", "点赞"]):
+        return "zhihu"
     # 默认知乎
     return "zhihu"
 
