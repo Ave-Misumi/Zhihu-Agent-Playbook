@@ -1032,6 +1032,16 @@ class BridgeLLM:
                     act["write_file"] = new_inner
                     print("[WARN] Auto-converted replace_file → write_file")
 
+            # 12c) 修复 done 缺 text：单引号导致 JSON 解析丢失 text 字段时自动填充
+            if "done" in act and isinstance(act["done"], dict):
+                done_inner = act["done"]
+                if "text" not in done_inner or not done_inner.get("text"):
+                    done_inner = dict(done_inner)
+                    done_inner["text"] = data.get("memory", data.get("thinking", "任务完成"))
+                    act = dict(act)
+                    act["done"] = done_inner
+                    print("[WARN] Auto-filled missing done.text")
+
             cleaned.append(act)
 
         # 10) 清理后如果 action 为空 → 用 wait 兜底（不用 done，避免 Agent 提前终止）
