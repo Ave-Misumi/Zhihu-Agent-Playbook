@@ -912,6 +912,25 @@ class BridgeLLM:
                     if k in act:
                         act.pop(k)
                         print(f"[WARN] Mode=wechat, removed {k} (not registered)")
+                # wechat 模式下，LLM 可能把 wechat_* 工具包在 evaluate 里当 JS 调用 → 自动解包
+                if "evaluate" in act:
+                    code = str(act.get("evaluate", ""))
+                    for tool_name in ("wechat_search_and_follow", "wechat_send_message"):
+                        if tool_name in code:
+                            m = re.search(rf'{tool_name}\(\{{(.+?)\}}\)', code, re.DOTALL)
+                            if m:
+                                try:
+                                    params = {}
+                                    for kv_match in re.finditer(r"(\w+):\s*['\"]([^'\"]+)['\"]", m.group(1)):
+                                        params[kv_match.group(1)] = kv_match.group(2)
+                                    if params:
+                                        act = dict(act)
+                                        act.pop("evaluate", None)
+                                        act[tool_name] = params
+                                        print(f"[WARN] Mode=wechat, unwrapped evaluate → {tool_name}")
+                                        break
+                                except Exception:
+                                    pass
 
             # 9) 修复 ask_human_for_intervention: Qwen 常输出字符串而非 {reason:...}
             if "ask_human_for_intervention" in act:
