@@ -1,6 +1,6 @@
 """微信（Windows 客户端）自动化工具集
 
-纯 Win32 PostMessage + 剪贴板方案。
+纯 Win32 SendInput / PostMessage + 剪贴板方案。
 支持新版 Weixin（Qt 渲染，无原生子控件）和老版 WeChat。
 
 功能：
@@ -17,6 +17,9 @@ from browser_use.tools.service import ActionResult
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
+
+# 使当前进程 DPI Aware，确保 GetWindowRect / SetCursorPos / 截图坐标一致
+user32.SetProcessDPIAware()
 
 # 64 位兼容：Win32 API restype/argtypes 声明
 kernel32.GlobalAlloc.restype = ctypes.c_void_p
@@ -37,11 +40,12 @@ user32.SetForegroundWindow.restype = ctypes.c_bool
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.ShowWindow.restype = ctypes.c_bool
 user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowRect.restype = ctypes.c_bool
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 
 # Win32 常量
 WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
-WM_CHAR = 0x0102
 VK_CONTROL = 0x11
 VK_RETURN = 0x0D
 VK_TAB = 0x09
@@ -50,27 +54,84 @@ VK_A = 0x41
 VK_F = 0x46
 VK_V = 0x56
 VK_ESCAPE = 0x1B
+VK_DOWN = 0x28
+VK_UP = 0x26
 
 SW_RESTORE = 9
 SW_SHOWNORMAL = 1
 SW_MINIMIZE = 6
+SWP_NOZORDER = 0x0004
+SWP_NOSIZE = 0x0001
+SWP_NOACTIVATE = 0x0010
+
+# SendInput 结构体
+INPUT_KEYBOARD = 1
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+class INPUT(ctypes.Structure):
+    _fields_ = [
+        ("type", wintypes.DWORD),
+        ("ki", KEYBDINPUT),
+    ]
+
+# 初始化 SendInput
+_EXTRA = (ctypes.c_ulong * 1)(0)
+user32.SendInput.restype = wintypes.UINT
+user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
 
 
 def _send_key(hwnd: int, vk: int, ctrl: bool = False) -> None:
-    """向窗口发送一次按键"""
-    if ctrl:
-        user32.PostMessageW(hwnd, WM_KEYDOWN, VK_CONTROL, 0)
-        time.sleep(0.02)
-    user32.PostMessageW(hwnd, WM_KEYDOWN, vk, 0)
-    time.sleep(0.02)
-    user32.PostMessageW(hwnd, WM_KEYUP, vk, 0)
-    time.sleep(0.02)
-    if ctrl:
-        user32.PostMessageW(hwnd, WM_KEYUP, VK_CONTROL, 0)
-        time.sleep(0.02)
+    """SendInput 全局按键（Qt 能正确处理），非 PostMessage"""
+    _ensure_foreground(hwnd)
+    time.sleep(0.05)
 
+    inputs = []
+    if ctrl:
+        inp = INPUT()
+        inp.type = INPUT_KEYBOARD
+        inp.ki.wVk = VK_CONTROL
+        inp.ki.dwExtraInfo = _EXTRA
+        inputs.append(inp)
 
-_CLIPBOARD_PUT_INITIALIZED = False
+    inp = INPUT()
+    inp.type = INPUT_KEYBOARD
+    inp.ki.wVk = vk
+    inp.ki.dwExtraInfo = _EXTRA
+    inputs.append(inp)
+
+    # Second copy for keyup
+    inp2 = INPUT()
+    inp2.type = INPUT_KEYBOARD
+    inp2.ki.wVk = vk
+    inp2.ki.dwFlags = KEYEVENTF_KEYUP
+    inp2.ki.dwExtraInfo = _EXTRA
+    inputs.append(inp2)
+
+    arr = (INPUT * len(inputs))(*inputs)
+    user32.SendInput(len(inputs), arr, ctypes.sizeof(INPUT))
+    time.sleep(0.05)
+
+    if ctrl:
+        inp_up = INPUT()
+        inp_up.type = INPUT_KEYBOARD
+        inp_up.ki.wVk = VK_CONTROL
+        inp_up.ki.dwFlags = KEYEVENTF_KEYUP
+        inp_up.ki.dwExtraInfo = _EXTRA
+        user32.SendInput(1, ctypes.pointer(inp_up), ctypes.sizeof(INPUT))
+        time.sleep(0.05)
+
+    time.sleep(0.1)
+
 
 def _clipboard_put(text: str) -> None:
     """写入文本到剪贴板 (CF_UNICODETEXT)"""
@@ -87,18 +148,36 @@ def _clipboard_put(text: str) -> None:
 
 def _clipboard_paste(hwnd: int) -> None:
     """Ctrl+V 粘贴剪贴板内容到窗口"""
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.1)
+    _ensure_foreground(hwnd)
     _send_key(hwnd, VK_V, ctrl=True)
-    time.sleep(0.3)
 
 
 def _ensure_foreground(hwnd: int) -> None:
-    """确保窗口在前台且可见"""
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.1)
+    """确保窗口在前台且真正获得焦点（AttachThreadInput 强制）"""
     user32.ShowWindow(hwnd, SW_SHOWNORMAL)
     time.sleep(0.1)
+
+    # Attach thread input 以允许 SetForegroundWindow 在异步线程中生效
+    fg_hwnd = user32.GetForegroundWindow()
+    target_tid = user32.GetWindowThreadProcessId(hwnd, None)
+    fg_tid = user32.GetWindowThreadProcessId(fg_hwnd, None)
+    if target_tid != fg_tid:
+        user32.AttachThreadInput(fg_tid, target_tid, True)
+    user32.SetForegroundWindow(hwnd)
+    if target_tid != fg_tid:
+        user32.AttachThreadInput(fg_tid, target_tid, False)
+    time.sleep(0.2)
+
+    # 若仍不在前台，用 Alt 键 trick 强制激活
+    if user32.GetForegroundWindow() != hwnd:
+        import pyautogui
+        pyautogui.keyDown('alt')
+        pyautogui.keyDown('tab')
+        pyautogui.keyUp('tab')
+        pyautogui.keyUp('alt')
+        time.sleep(0.1)
+        user32.SetForegroundWindow(hwnd)
+        time.sleep(0.1)
 
 
 # ═══════════════════════════════════════════════
@@ -138,9 +217,10 @@ def _find_wechat_exe() -> str | None:
 
 
 def _find_wechat_hwnd() -> int | None:
-    """Win32 枚举所有顶层窗口，返回微信窗口句柄"""
+    """Win32 枚举所有顶层窗口，找到微信主窗口（PID匹配+尺寸过滤+可见性优先）。"""
     import subprocess
 
+    # 先通过进程名拿到所有 WeChat/Weixin 的 PID
     pids = []
     for name in ("WeChat.exe", "Weixin.exe"):
         try:
@@ -172,108 +252,246 @@ def _find_wechat_hwnd() -> int | None:
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if pid.value not in pids:
-            return ctypes.c_bool(True)
+            return True
+        # 必须可见且非最小化（尺寸 > 0）
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        r = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(r))
+        w = r.right - r.left
+        h = r.bottom - r.top
+        if w < 500 or h < 400:
+            return True
+        # 过滤最小化到托盘的窗口（典型位置 -32000,-32000）
+        if r.left <= -30000 or r.top <= -30000:
+            return True
+        # 只保留有标题的窗口
         length = user32.GetWindowTextLengthW(hwnd)
-        title = ""
-        if length > 0:
-            buf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, buf, length + 1)
-            title = buf.value
-        if not title or not any(kw in title for kw in ("微信", "Weixin")):
-            return ctypes.c_bool(True)
-        style = user32.GetWindowLongW(hwnd, -16)
-        is_visible = bool(style & 0x10000000)
-        is_tool = bool(style & 0x00000080)
-        score = (10 if is_visible else 0) + (5 if title else 0) + (0 if is_tool else 3)
+        if length == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value
+        if not any(kw in title for kw in ("微信", "Weixin")):
+            return True
+        # 评分：尺寸优先，标题/可见性加分
+        score = (w * h // 10000) + (10 if title else 0) + 20
         if score > best_score:
             best_score = score
             best = hwnd
-        return ctypes.c_bool(True)
+        return True
 
     user32.EnumWindows(_enum, 0)
     return best
 
 
+# 微信主窗口句柄缓存，避免重复恢复导致窗口状态异常
+_CACHED_HWND: int | None = None
+
+
 def _get_wechat_hwnd() -> int | None:
-    """获取微信窗口句柄，必要时恢复/启动"""
+    """获取微信主窗口句柄。
 
-    hwnd = _find_wechat_hwnd()
-    if hwnd:
-        # 1) 确保不在最小化状态
-        user32.ShowWindow(hwnd, SW_RESTORE)
-        user32.SetForegroundWindow(hwnd)
-        time.sleep(0.3)
+    策略：
+      1. 若缓存句柄仍然有效且可见，直接复用（避免重复 Ctrl+Alt+W）。
+      2. 否则如果已有微信进程运行，通过全局热键 Ctrl+Alt+W 恢复窗口。
+      3. 如果没有运行，才全新启动微信。
+    """
+    import subprocess
+    import pyautogui
 
-        # 2) SendMessage WM_SIZE → Qt 监听到这个会触发整个 resizeEvent 链
-        #    包括 QWebEngineView::resizeEvent → 重新分配 GPU 缓冲区
-        r = wintypes.RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(r))
-        w = r.right - r.left
-        h = r.bottom - r.top
+    global _CACHED_HWND
 
-        WM_SIZE = 0x0005
-        SIZE_RESTORED = 0
-        # lParam = MAKELPARAM(width, height)
-        lparam = (h << 16) | (w & 0xFFFF)
-        user32.SendMessageW(hwnd, WM_SIZE, SIZE_RESTORED, lparam)
+    # 1. 优先使用缓存
+    if _CACHED_HWND is not None:
+        if user32.IsWindow(_CACHED_HWND) and user32.IsWindowVisible(_CACHED_HWND):
+            r = wintypes.RECT()
+            user32.GetWindowRect(_CACHED_HWND, ctypes.byref(r))
+            ww = r.right - r.left
+            hh = r.bottom - r.top
+            if ww >= 500 and hh >= 400:
+                print(f"[WECHAT] 复用缓存主窗口: hwnd={_CACHED_HWND}")
+                _ensure_foreground(_CACHED_HWND)
+                return _CACHED_HWND
+        print(f"[WECHAT] 缓存窗口无效，重新获取...")
+        _CACHED_HWND = None
 
-        # 3) 再 InvalidateRect + UpdateWindow 触发 WM_PAINT
-        user32.InvalidateRect(hwnd, None, True)
-        user32.UpdateWindow(hwnd)
-
-        # 4) 再 SendMessage WM_ACTIVATE 确保 Qt 认为窗口被激活
-        WM_ACTIVATE = 0x0006
-        WA_ACTIVE = 1
-        user32.SendMessageW(hwnd, WM_ACTIVATE, WA_ACTIVE, 0)
-
-        user32.SetForegroundWindow(hwnd)
-        time.sleep(0.5)
-        print("[WECHAT] 窗口恢复完成（WM_SIZE + WM_ACTIVATE）")
-        return hwnd
-
-    # 窗口还没出来，尝试快捷键恢复
+    # 2. 已有运行则热键恢复
     if _is_wechat_running():
-        print("[WECHAT] 进程运行但无窗口，Ctrl+Alt+W 恢复...")
-        auto.SendKeys("{Ctrl}{Alt}w")
-        time.sleep(2)
+        print("[WECHAT] 检测到已登录微信，尝试通过 Ctrl+Alt+W 恢复主窗口...")
+        pyautogui.keyDown('ctrl')
+        pyautogui.keyDown('alt')
+        pyautogui.keyDown('w')
+        pyautogui.keyUp('w')
+        pyautogui.keyUp('alt')
+        pyautogui.keyUp('ctrl')
+        time.sleep(2.5)
+
         hwnd = _find_wechat_hwnd()
         if hwnd:
-            user32.ShowWindow(hwnd, SW_RESTORE)
-            user32.SetForegroundWindow(hwnd)
-            time.sleep(1.5)
+            _ensure_foreground(hwnd)
+            _CACHED_HWND = hwnd
+            print(f"[WECHAT] 已恢复主窗口: hwnd={hwnd}")
             return hwnd
+        print("[WECHAT] 热键恢复失败，将尝试全新启动...")
+    else:
+        print("[WECHAT] 未检测到运行中的微信，全新启动...")
 
-    # 启动
+    # 3. 只有未运行/恢复失败时才全新启动
+    os.system('taskkill /F /IM Weixin.exe >nul 2>&1')
+    os.system('taskkill /F /IM WeChat.exe >nul 2>&1')
+    time.sleep(1)
+
     exe = _find_wechat_exe()
     if exe is None:
         raise RuntimeError("未找到微信可执行文件")
-    print("[WECHAT] 启动微信...")
     os.startfile(exe)
 
-    for i in range(60):
-        hwnd = _find_wechat_hwnd()
-        if hwnd:
-            user32.SetForegroundWindow(hwnd)
-            time.sleep(1)
-            return hwnd
-        # 检查登录窗口
-        login = auto.WindowControl(Name="微信", ClassName="LoginWnd")
-        qr = auto.WindowControl(Name="登录")
-        if login.Exists(maxSearchSeconds=1) or qr.Exists(maxSearchSeconds=1):
-            print("[WECHAT] 等待扫码登录...")
-            for _ in range(120):
-                hwnd = _find_wechat_hwnd()
-                if hwnd:
-                    user32.SetForegroundWindow(hwnd)
-                    time.sleep(1)
-                    return hwnd
-                time.sleep(1)
-            return None
-        if i == 5:
-            print("[WECHAT] 等待微信窗口...")
+    # 等 Qt 登录面板出现
+    login_hwnd = None
+    login_rect = None
+    for i in range(30):
         time.sleep(1)
+        pid = None
+        for name in ("WeChat.exe", "Weixin.exe"):
+            try:
+                out = subprocess.check_output(
+                    f'tasklist /FI "IMAGENAME eq {name}" /FO CSV /NH',
+                    shell=True, text=True
+                )
+                for line in out.strip().split('\n'):
+                    if name in line:
+                        pid = int(line.replace('"', '').split(',')[1].strip())
+                        break
+            except Exception:
+                pass
+            if pid:
+                break
+        if not pid:
+            continue
 
-    return _find_wechat_hwnd()
+        # 枚举该 PID 的所有可见窗口
+        result = {}
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        @WNDENUMPROC
+        def _enum(hwnd, _lp):
+            wp = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+            if wp.value != pid:
+                return True
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            r = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(r))
+            ww, hh = r.right - r.left, r.bottom - r.top
+            if ww < 100 or hh < 100:
+                return True
+            cls_buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cls_buf, 256)
+            title_buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title_buf, 256)
+            result['cls'] = cls_buf.value
+            result['hwnd'] = hwnd
+            result['rect'] = (r.left, r.top, r.right, r.bottom)
+            result['title'] = title_buf.value
+            return False
+
+        user32.EnumWindows(_enum, 0)
+        if result:
+            login_hwnd = result['hwnd']
+            login_rect = result['rect']
+            print(f"[WECHAT] 登录面板: hwnd={login_hwnd} cls={result['cls']} {login_rect[2]-login_rect[0]}x{login_rect[3]-login_rect[1]}")
+            break
+        if i % 5 == 4:
+            print(f"[WECHAT] 等待登录面板... ({i+1}s)")
+
+    if login_hwnd is None:
+        print("[WECHAT] 登录面板未出现")
+        return None
+
+    # 点绿色"登录"按钮（位于面板底部 ~y=355）
+    x, y, x2, y2 = login_rect
+    w = x2 - x
+    login_btn_x = x + w // 2
+    login_btn_y = y + 358  # 面板 388px 中按钮在 y~340-375
+    print(f"[WECHAT] 点击登录按钮 ({login_btn_x}, {login_btn_y})...")
+
+    user32.SetForegroundWindow(login_hwnd)
+    time.sleep(0.3)
+    user32.SetCursorPos(login_btn_x, login_btn_y)
+    time.sleep(0.1)
+    import pyautogui
+    pyautogui.click(login_btn_x, login_btn_y)
+    time.sleep(2)
+
+    # 等主窗口出现（>800x600）
+    print("[WECHAT] 等待主聊天窗口...")
+    for i in range(30):
+        time.sleep(1)
+        large_windows = []
+        pid = None
+        for name in ("WeChat.exe", "Weixin.exe"):
+            try:
+                out = subprocess.check_output(
+                    f'tasklist /FI "IMAGENAME eq {name}" /FO CSV /NH',
+                    shell=True, text=True
+                )
+                for line in out.strip().split('\n'):
+                    if name in line:
+                        parts = line.replace('"', '').split(',')
+                        if len(parts) >= 2:
+                            try:
+                                pid = int(parts[1].strip())
+                            except ValueError:
+                                pass
+            except Exception:
+                pass
+            if pid:
+                break
+        if not pid:
+            continue
+
+        best = None
+        best_score = -1
+        WNDENUMPROC2 = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        @WNDENUMPROC2
+        def _enum2(hwnd, _lp):
+            nonlocal best, best_score
+            wp = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+            if wp.value != pid:
+                return True
+            r = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(r))
+            ww, hh = r.right - r.left, r.bottom - r.top
+            if ww < 500 or hh < 400:
+                return True
+            visible = user32.IsWindowVisible(hwnd)
+            if not visible:
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(max(256, length + 1))
+            user32.GetWindowTextW(hwnd, buf, 256)
+            title = buf.value
+            score = ww * hh // 10000 + (20 if visible else 0) + (10 if title else 0)
+            if score > best_score:
+                best_score = score
+                best = hwnd
+            return True
+
+        user32.EnumWindows(_enum2, 0)
+        if best:
+            user32.SetForegroundWindow(best)
+            time.sleep(1)
+            print(f"[WECHAT] 主窗口就绪: hwnd={best}")
+            return best
+        if i % 5 == 4:
+            print(f"[WECHAT] 等待主窗口... ({i+1}s)")
+
+    print("[WECHAT] 主窗口未出现，可能需要手动登录")
+    return None
 
 
 # ═══════════════════════════════════════════════
@@ -281,11 +499,26 @@ def _get_wechat_hwnd() -> int | None:
 # ═══════════════════════════════════════════════
 
 def _open_search(hwnd: int) -> None:
-    """Ctrl+F 打开搜索框并清空"""
+    """Ctrl+F 打开搜索框并清空。必须使用 SendInput 才能被 Qt WebEngine 处理。"""
     _ensure_foreground(hwnd)
     time.sleep(0.3)
-    _send_key(hwnd, VK_F, ctrl=True)   # Ctrl+F
-    time.sleep(0.4)
+
+    # 先点击窗口客户区安全位置（标题栏下方）确保焦点在 WeChat 内
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    client_x = r.left + (r.right - r.left) // 2
+    client_y = r.top + 80
+    user32.SetCursorPos(client_x, client_y)
+    time.sleep(0.1)
+    user32.mouse_event(0x0002, 0, 0, 0, 0)
+    time.sleep(0.05)
+    user32.mouse_event(0x0004, 0, 0, 0, 0)
+    time.sleep(0.3)
+
+    # 通过 SendInput 发送 Ctrl+F（全局输入管线，Qt 能正确响应）
+    _send_key(hwnd, VK_F, ctrl=True)
+    time.sleep(0.8)
+
     # 清空已有内容：Ctrl+A, Delete
     _send_key(hwnd, VK_A, ctrl=True)
     time.sleep(0.1)
@@ -303,42 +536,30 @@ def _search_keyword(hwnd: int, keyword: str) -> None:
 
 
 def _navigate_to_first_result(hwnd: int) -> None:
-    """Tab 到搜索结果列表第一项→Enter 打开"""
-    # 微信搜索结果是右侧面板，搜索框在下，结果列表在上
-    # 通常需要 Shift+Tab 或多次 Tab 导航到结果区
-    for _ in range(3):
-        _send_key(hwnd, VK_TAB)
-        time.sleep(0.2)
+    """Down按一次→Enter"""
+    for _ in range(2):
+        _send_key(hwnd, VK_DOWN)
+        time.sleep(0.15)
     _send_key(hwnd, VK_RETURN)
     time.sleep(1.5)
 
 
 def _click_follow_via_keyboard(hwnd: int) -> bool:
-    """Tab 在资料/会话页找「关注」按钮。新版微信关注按钮通常在页面中段。"""
-    # 先确保焦点在页面内容区（可能需要 Shift+Tab 回到顶部再 Tab 下来）
-    for _ in range(2):
+    """Tab 遍历到关注按钮→Enter"""
+    for _ in range(4):
         _send_key(hwnd, VK_TAB)
         time.sleep(0.15)
-    time.sleep(0.5)
-
-    # Tab 遍历大概 5-8 个元素到关注按钮
-    for _ in range(10):
-        _send_key(hwnd, VK_TAB)
-        time.sleep(0.15)
-    # Enter 触发
     _send_key(hwnd, VK_RETURN)
     time.sleep(2)
-    return True  # 无 UI 反馈，只能假设成功
+    return True
 
 
 def _goto_message_input(hwnd: int) -> None:
     """导航到聊天输入框并清空"""
-    # 从会话页顶部 Tab 到底部输入框
     for _ in range(8):
         _send_key(hwnd, VK_TAB)
         time.sleep(0.12)
     time.sleep(0.3)
-    # 清空
     _send_key(hwnd, VK_A, ctrl=True)
     time.sleep(0.1)
     _send_key(hwnd, VK_DELETE)
