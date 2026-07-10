@@ -13,7 +13,6 @@ import ctypes
 from ctypes import wintypes
 
 import uiautomation as auto
-from browser_use.tools.service import ActionResult
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -589,12 +588,12 @@ async def wechat_search_and_follow(
     keyword: str,
     message: str = "",
     account_type: str = "服务号",
-) -> ActionResult:
+) -> str:
     """搜索公众号/服务号 → 关注 → 发送私信（键盘+剪贴板方案）"""
     try:
         hwnd = _get_wechat_hwnd()
         if hwnd is None:
-            return ActionResult(error="微信未登录，请扫码登录后重试")
+            return "微信未登录，请扫码登录后重试"
 
         # 1. Ctrl+F → 输入关键词 → 回车搜索
         _open_search(hwnd)
@@ -612,23 +611,23 @@ async def wechat_search_and_follow(
         if message:
             _goto_message_input(hwnd)
             _send_message(hwnd, message)
-            result += f"，已发送私信"
+            result += "，已发送私信"
 
-        return ActionResult(extracted_content=result)
+        return result
 
     except Exception as e:
-        return ActionResult(error=f"微信操作失败: {e}")
+        return f"微信操作失败: {e}"
 
 
 async def wechat_send_message(
     contact_name: str,
     message: str,
-) -> ActionResult:
+) -> str:
     """给已关注的联系人/公众号发送消息"""
     try:
         hwnd = _get_wechat_hwnd()
         if hwnd is None:
-            return ActionResult(error="微信未登录")
+            return "微信未登录"
 
         _open_search(hwnd)
         _search_keyword(hwnd, contact_name)
@@ -637,7 +636,7 @@ async def wechat_send_message(
         _goto_message_input(hwnd)
         _send_message(hwnd, message)
 
-        return ActionResult(extracted_content=f"已给「{contact_name}」发送消息")
+        return f"已给「{contact_name}」发送消息"
 
     except Exception as e:
-        return ActionResult(error=f"微信发消息失败: {e}")
+        return f"微信发消息失败: {e}"

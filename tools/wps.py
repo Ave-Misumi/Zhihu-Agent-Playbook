@@ -12,7 +12,6 @@ import time
 
 import pythoncom
 import win32com.client
-from browser_use.tools.service import ActionResult
 from tools.wps_playbook import auto_save_wps_template
 
 # ═══════════════════════════════════════════════
@@ -78,7 +77,7 @@ async def wps_create_document_and_export_pdf(
     body_font: str = "宋体",
     body_size: str = "小四",
     line_spacing: str = "28",
-) -> ActionResult:
+) -> str:
     """
     参数:
         line_spacing  正文行距（磅值），默认 28pt ≈ 1.5 倍行距
@@ -153,16 +152,14 @@ async def wps_create_document_and_export_pdf(
                                heading_font, heading_size,
                                body_font, body_size, line_spacing)
 
-        return ActionResult(
-            extracted_content=(
-                f"WPS 文档完成！\n"
-                f"DOCX: {docx_path}\n"
-                f"PDF:  {pdf_path}\n"
-                f"排版: 标题 {title_font} {title_size}({ttl_size_pt}pt) | "
-                f"小节 {heading_font} {heading_size}({hdg_size_pt}pt) | "
-                f"正文 {body_font} {body_size}({bdy_size_pt}pt) | "
-                f"行距 {lsp_pt}pt"
-            )
+        return (
+            f"WPS 文档完成！\n"
+            f"DOCX: {docx_path}\n"
+            f"PDF:  {pdf_path}\n"
+            f"排版: 标题 {title_font} {title_size}({ttl_size_pt}pt) | "
+            f"小节 {heading_font} {heading_size}({hdg_size_pt}pt) | "
+            f"正文 {body_font} {body_size}({bdy_size_pt}pt) | "
+            f"行距 {lsp_pt}pt"
         )
 
     except Exception as e:
@@ -171,7 +168,7 @@ async def wps_create_document_and_export_pdf(
                 doc.Close(SaveChanges=False)
             except Exception:
                 pass
-        return ActionResult(error=f"WPS 操作失败: {e}")
+        return f"WPS 操作失败: {e}"
     finally:
         pythoncom.CoUninitialize()
 

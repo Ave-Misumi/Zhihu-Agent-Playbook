@@ -3,17 +3,12 @@ Agent 工厂：
 - 知乎链路：browser-use Agent（浏览器自动化）
 - WPS / 微信链路：LangChain ReAct Agent（纯工具调用，无需浏览器）
 """
-import os
-import asyncio
-from typing import Any, Dict
-
 from browser_use import Agent
 from browser_use.browser.session import BrowserSession
 from browser_use.browser.profile import BrowserProfile
 from browser_use.tools.service import Tools
 
 from langchain_core.prompts import PromptTemplate
-from langchain import hub
 from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.tools import tool as langchain_tool
 from langchain_core.tools import render_text_description
@@ -185,76 +180,14 @@ async def create_zhihu_agent(task: str) -> Agent:
 
 
 # ═══════════════════════════════════════════════════════════
-# WPS / 微信工具：适配 LangChain ReAct（返回值字符串化）
+# WPS / 微信工具：直接注册为 LangChain 工具
 # ═══════════════════════════════════════════════════════════
 
-def _extract_result(value: Any) -> str:
-    """把 browser-use ActionResult 或任意返回值转成字符串给 ReAct 观察"""
-    if hasattr(value, "extracted_content"):
-        return str(value.extracted_content)
-    if hasattr(value, "content"):
-        return str(value.content)
-    return str(value)
-
-
-@langchain_tool
-def wps_create_document_and_export_pdf_langchain(
-    title: str,
-    body_md: str,
-    output_dir: str = "",
-    title_font: str = "黑体",
-    title_size: str = "小二",
-    heading_font: str = "黑体",
-    heading_size: str = "小三",
-    body_font: str = "宋体",
-    body_size: str = "小四",
-    line_spacing: str = "28",
-) -> str:
-    """启动 WPS 新建文字文档，写入标题和正文（Markdown 格式），设置字体/段落/编号，
-    保存 .docx 并导出 PDF。完成后返回文件路径。"""
-    result = wps_create_document_and_export_pdf(
-        title=title,
-        body_md=body_md,
-        output_dir=output_dir,
-        title_font=title_font,
-        title_size=title_size,
-        heading_font=heading_font,
-        heading_size=heading_size,
-        body_font=body_font,
-        body_size=body_size,
-        line_spacing=line_spacing,
-    )
-    return _extract_result(result)
-
-
-@langchain_tool
-def get_wps_template_langchain(template_type: str) -> str:
-    """查询指定类型（周报/会议纪要/报告/通知/计划/总结/简历/文章）的 WPS 文档模板缓存，
-    返回上次使用的排版参数和章节结构骨架。"""
-    return get_wps_template(template_type)
-
-
-@langchain_tool
-def wechat_search_and_follow_langchain(
-    keyword: str,
-    message: str = "",
-    account_type: str = "服务号",
-) -> str:
-    """在微信桌面客户端搜索指定名称的公众号/服务号并关注，可选发送私信。
-    搜索+关注+发私信一步完成。若只需关注不发消息，message 留空即可。"""
-    result = wechat_search_and_follow(
-        keyword=keyword,
-        message=message,
-        account_type=account_type,
-    )
-    return _extract_result(result)
-
-
-@langchain_tool
-def wechat_send_message_langchain(contact_name: str, message: str) -> str:
-    """给微信聊天列表中已有的联系人/公众号发送文字消息。仅用于已关注的账号，不需要再搜索。"""
-    result = wechat_send_message(contact_name=contact_name, message=message)
-    return _extract_result(result)
+# 把原工具函数包装成 LangChain 工具（docstring 会被自动用作工具描述）
+wps_create_document_and_export_pdf_langchain = langchain_tool(wps_create_document_and_export_pdf)
+get_wps_template_langchain = langchain_tool(get_wps_template)
+wechat_search_and_follow_langchain = langchain_tool(wechat_search_and_follow)
+wechat_send_message_langchain = langchain_tool(wechat_send_message)
 
 
 # ═══════════════════════════════════════════════════════════
