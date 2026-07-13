@@ -1154,7 +1154,7 @@ class BridgeLLM:
 
 
 def get_llm():
-    """创建并返回配置好的 LLM 实例"""
+    """创建并返回配置好的 LLM 实例（browser-use 兼容包装）"""
     from langchain_openai import ChatOpenAI
     
     # 运行时验证配置（导入时不验证，允许预加载模块）
@@ -1170,6 +1170,23 @@ def get_llm():
         max_tokens=8192,
     )
     return BridgeLLM(inner)
+
+
+def get_raw_llm():
+    """返回原生 LangChain ChatOpenAI 实例（用于 ReAct 等非 browser-use 场景）"""
+    from langchain_openai import ChatOpenAI
+    
+    _validate_config()
+    
+    return ChatOpenAI(
+        model=LLM_MODEL,
+        base_url=LLM_BASE_URL,
+        api_key=LLM_API_KEY,
+        temperature=0.3,
+        timeout=180,
+        max_retries=2,
+        max_tokens=8192,
+    )
 
 
 # ==========================================
