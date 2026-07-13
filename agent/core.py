@@ -221,15 +221,73 @@ def _create_tool_agent_executor(tools, system_prompt: str, max_iterations: int =
     )
 
 
+def _get_latest_wps_template(task: str) -> dict | None:
+    """同步读取最新一条 WPS 模板（不含 IO 和 LLM 调用），失败返回 None"""
+    try:
+        import json, os, re
+        from tools.wps_playbook import _load_templates, _guess_template_type, _make_template_key
+        templates = _load_templates()
+        if not templates:
+            return None
+        m = re.search(r"[《「"'"](.+?)[》」"'"']", task)
+        title_guess = m.group(1) if m else task[:20]
+        tt = _guess_template_type(title_guess, "")
+        prefix = _make_template_key(tt, "")
+        matches = [v for k, v in templates.items() if k.startswith(prefix)]
+        return matches[0] if matches else None
+    except Exception:
+        return None
+
+
+def _build_wps_prompt(task: str) -> str:
+    """构造 WPS system prompt，如果缓存命中则预填排版参数，省掉工具往返"""
+    tmpl = _get_latest_wps_template(task)
+    if tmpl and "formatting" in tmpl:
+        fmt = tmpl["formatting"]
+        skeleton_str = " → ".join(tmpl.get("skeleton", []) or [])
+        cached_section = (
+            "## 已有模板（任务「" + tmpl.get("title", "") + "」，" + tmpl.get("updated", "") + "）\n"
+            "模板已缓存，**禁止再调 get_wps_template**。请直接复用以下参数调 wps_create_document_and_export_pdf：\n"
+            "  title_font=" + fmt.get("title_font", "黑体") + "  title_size=" + fmt.get("title_size", "小二") + "\n"
+            "  heading_font=" + fmt.get("heading_font", "黑体") + "  heading_size=" + fmt.get("heading_size", "小三") + "\n"
+            "  body_font=" + fmt.get("body_font", "宋体") + "  body_size=" + fmt.get("body_size", "小四") + "\n"
+            "  line_spacing=" + fmt.get("line_spacing", "28") + "\n"
+            "参考章节结构：" + skeleton_str + "\n"
+        )
+        s1 = "1. 先调 get_wps_template 查缓存。命中直接复用参数。"
+        s2 = "2. 最多调一次 get_wps_template。返回结果后,无论命中与否,下一步必须直接调 wps_create_document_and_export_pdf。"
+        r1 = "1. 模板已命中（见上方），直接复用排版参数。"
+        r2 = "2. 直接调 wps_create_document_and_export_pdf 完成创作。"
+    else:
+        s1 = "1. 先调 get_wps_template 查缓存。命中直接复用参数。"
+        s2 = "2. 最多调一次 get_wps_template。返回结果后,无论命中与否,下一步必须直接调 wps_create_document_and_export_pdf。"
+        r1 = "1. 模板缓存未命中，使用默认排版参数（标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅）。"
+        r2 = "2. 先调一次 get_wps_template 查缓存，然后直接调 wps_create_document_and_export_pdf。"
+        cached_section = ""
+
+    prompt = WPS_SYSTEM_PROMPT
+    prompt = prompt.replace(s1, r1, 1)
+    prompt = prompt.replace(s2, r2, 1)
+    if cached_section:
+        prompt = prompt.replace("## 执行策略", cached_section + "## 执行策略", 1)
+    return prompt
+
+
 async def create_wps_agent(task: str):
-    """WPS 链路:LangChain Tool Calling Agent + WPS 工具"""
+    """WPS 链路:LangChain Tool Calling Agent + WPS 工具
+
+    启动时自动注入最新模板的排版参数到 system prompt，
+    非首次任务 LLM 直接复用，跳过 get_wps_template 往返调用。
+    """
     set_agent_mode("wps")
     tools = [
         wps_create_document_and_export_pdf_langchain,
         get_wps_template_langchain,
     ]
+    # 注入最新模板：命中则预填参数，省掉一次工具往返
+    prompt = _build_wps_prompt(task)
     executor = _create_tool_agent_executor(
-        tools, WPS_SYSTEM_PROMPT, max_iterations=6
+        tools, prompt, max_iterations=6
     )
     return executor, task
 
