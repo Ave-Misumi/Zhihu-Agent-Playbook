@@ -129,7 +129,12 @@ async def wps_create_document_and_export_pdf(
             if sec["kind"] == "h2":
                 h2_count += 1
                 _add_heading(doc, sec["text"], h2_count, heading_font, hdg_size_pt)
-                _write_list_items(doc, sec["items"], body_font, bdy_size_pt, lsp_pt)
+                # 只有 3 条以上才编号列表；1-2 条当正文段落处理
+                if len(sec["items"]) >= 3:
+                    _write_list_items(doc, sec["items"], body_font, bdy_size_pt, lsp_pt)
+                else:
+                    for item in sec["items"]:
+                        _add_paragraph(doc, item, body_font, bdy_size_pt, lsp_pt)
                 for para in sec["paragraphs"]:
                     _add_paragraph(doc, para, body_font, bdy_size_pt, lsp_pt)
             elif sec["kind"] == "preamble":
@@ -291,7 +296,7 @@ def _parse_sections(body: str) -> list[dict]:
 # ═══════════════════════════════════════════════
 
 def _new_paragraph(doc):
-    """在文档末尾插入一个格式干净的空白段落"""
+    """在文档末尾插入一个格式干净的空白段落（段落格式 + 字体属性均重置）"""
     rng = doc.Range(doc.Content.End - 1, doc.Content.End)
     rng.Collapse(wdCollapseEnd)
     rng.InsertParagraphAfter()
@@ -303,6 +308,12 @@ def _new_paragraph(doc):
     pf.LineSpacingRule = 0
     pf.FirstLineIndent = 0
     pf.LeftIndent      = 0
+    # 字体属性也重置，防止继承上一段的加粗/倾斜
+    rng2 = last.Range
+    rng2.Font.Bold   = False
+    rng2.Font.Italic = False
+    rng2.Font.Name   = "宋体"
+    rng2.Font.Size   = 12.0
 
 
 def _set_title_paragraph(doc, title: str, font: str, size_pt: float):
@@ -342,6 +353,8 @@ def _add_paragraph(doc, text: str, font: str, size_pt: float, lsp_pt: float):
     rng = p.Range
     rng.Font.Name = font
     rng.Font.Size = size_pt
+    rng.Font.Bold = False
+    rng.Font.Italic = False
     pf = p.Format
     pf.LineSpacingRule = wdLineSpacingExactly
     pf.LineSpacing = lsp_pt
@@ -353,11 +366,14 @@ def _write_list_items(doc, items: list[str], font: str, size_pt: float, lsp_pt: 
     for i, text in enumerate(items, 1):
         _new_paragraph(doc)
         p = doc.Paragraphs.Last
-        # 写入时手动加序号，不依赖 WPS 的自动编号（避免列表跨段断裂）
+        # 防止 LLM 在文本里已经写了数字前缀 → 双重编号
+        text = re.sub(r"^\d+[.、)．]\s*", "", text)
         p.Range.Text = f"{i}. {text}"
         rng = p.Range
         rng.Font.Name = font
         rng.Font.Size = size_pt
+        rng.Font.Bold = False
+        rng.Font.Italic = False
         pf = p.Format
         pf.LineSpacingRule = wdLineSpacingExactly
         pf.LineSpacing = lsp_pt
