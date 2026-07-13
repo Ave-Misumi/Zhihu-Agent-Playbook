@@ -177,7 +177,13 @@ async def get_wps_template(
         v for k, v in templates.items()
         if k.startswith(prefix)
     ]
-    # 只返回最新一条：同类文章的排版参数相同，不需要 LLM 逐条比对
+    if not matches:
+        print(f"[WPS-PLAYBOOK] MISS template_type={template_type} | returning guidance")
+        return json.dumps({
+            "status": "no_template",
+            "message": f"没有「{template_type}」类型的缓存模板。请使用默认排版参数从头创作：标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅。"
+        }, ensure_ascii=False, indent=2)
+
     latest = matches[0]
     fmt = latest.get("formatting", {})
     print(f"[WPS-PLAYBOOK] HIT  template_type={template_type} | "
@@ -185,12 +191,6 @@ async def get_wps_template(
           f"{fmt.get('title_font')} {fmt.get('title_size')}/{fmt.get('body_font')} {fmt.get('body_size')}/{fmt.get('line_spacing')}pt | "
           f"updated={latest.get('updated')}")
     return json.dumps(latest, ensure_ascii=False, indent=2)
-
-    print(f"[WPS-PLAYBOOK] MISS template_type={template_type} | returning guidance")
-    return json.dumps({
-        "status": "no_template",
-        "message": f"没有「{template_type}」类型的缓存模板。请使用默认排版参数从头创作：标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅。"
-    }, ensure_ascii=False, indent=2)
 
 
 def auto_save_wps_template(

@@ -247,16 +247,16 @@ def _build_wps_prompt(task: str) -> str:
         skeleton_str = " → ".join(tmpl.get("skeleton", []) or [])
         cached_section = (
             "## 已有模板（任务「" + tmpl.get("title", "") + "」，" + tmpl.get("updated", "") + "）\n"
-            "模板已缓存，**禁止再调 get_wps_template**。请直接复用以下参数调 wps_create_document_and_export_pdf：\n"
-            "  title_font=" + fmt.get("title_font", "黑体") + "  title_size=" + fmt.get("title_size", "小二") + "\n"
-            "  heading_font=" + fmt.get("heading_font", "黑体") + "  heading_size=" + fmt.get("heading_size", "小三") + "\n"
-            "  body_font=" + fmt.get("body_font", "宋体") + "  body_size=" + fmt.get("body_size", "小四") + "\n"
-            "  line_spacing=" + fmt.get("line_spacing", "28") + "\n"
+            "参考排版参数如下，但 **用户要求优先** —— 若用户指定了不同格式，以用户为准：\n"
+            "  默认 title_font=" + fmt.get("title_font", "黑体") + "  title_size=" + fmt.get("title_size", "小二") + "\n"
+            "  默认 heading_font=" + fmt.get("heading_font", "黑体") + "  heading_size=" + fmt.get("heading_size", "小三") + "\n"
+            "  默认 body_font=" + fmt.get("body_font", "宋体") + "  body_size=" + fmt.get("body_size", "小四") + "\n"
+            "  默认 line_spacing=" + fmt.get("line_spacing", "28") + "\n"
             "参考章节结构：" + skeleton_str + "\n"
         )
         s1 = "1. 先调 get_wps_template 查缓存。命中直接复用参数。"
         s2 = "2. 最多调一次 get_wps_template。返回结果后,无论命中与否,下一步必须直接调 wps_create_document_and_export_pdf。"
-        r1 = "1. 模板已命中（见上方），直接复用排版参数。"
+        r1 = "1. 模板已命中（见上方），默认排版参数如上。若用户指定了不同格式则用用户的。"
         r2 = "2. 直接调 wps_create_document_and_export_pdf 完成创作。"
     else:
         s1 = "1. 先调 get_wps_template 查缓存。命中直接复用参数。"
