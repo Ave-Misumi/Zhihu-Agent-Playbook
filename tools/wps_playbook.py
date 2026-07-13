@@ -166,10 +166,10 @@ async def get_wps_template(
     """
     查询 WPS 文档模板缓存。
 
-    返回 JSON：该类型下所有历史模板列表（按更新时间倒序），每个含 title/skeleton/formatting/updated。
-    未命中 → {"status":"no_template","message":"..."}
+    返回 JSON：命中 → 该类型最新一条模板（含 title/skeleton/formatting/updated）
+            未命中 → {"status":"no_template","message":"..."}
 
-    LLM 应从中选择标题最匹配的模板复用其 formatting 参数。
+    同类文章排版参数相同，只返回最新一条，LLM 拿到后直接复用。
     """
     templates = _load_templates()
     prefix = _make_template_key(template_type, "")
@@ -177,16 +177,14 @@ async def get_wps_template(
         v for k, v in templates.items()
         if k.startswith(prefix)
     ]
-    matches.sort(key=lambda t: t.get("updated", ""), reverse=True)
-
-    if matches:
-        print(f"[WPS-PLAYBOOK] HIT  template_type={template_type} | {len(matches)} cached")
-        for t in matches:
-            fmt = t.get("formatting", {})
-            print(f"  - \"{t.get('title','')}\" | "
-                  f"{fmt.get('title_font')} {fmt.get('title_size')}/{fmt.get('body_font')} {fmt.get('body_size')}/{fmt.get('line_spacing')}pt | "
-                  f"updated={t.get('updated')}")
-        return json.dumps(matches, ensure_ascii=False, indent=2)
+    # 只返回最新一条：同类文章的排版参数相同，不需要 LLM 逐条比对
+    latest = matches[0]
+    fmt = latest.get("formatting", {})
+    print(f"[WPS-PLAYBOOK] HIT  template_type={template_type} | "
+          f"\"{latest.get('title','')}\" | "
+          f"{fmt.get('title_font')} {fmt.get('title_size')}/{fmt.get('body_font')} {fmt.get('body_size')}/{fmt.get('line_spacing')}pt | "
+          f"updated={latest.get('updated')}")
+    return json.dumps(latest, ensure_ascii=False, indent=2)
 
     print(f"[WPS-PLAYBOOK] MISS template_type={template_type} | returning guidance")
     return json.dumps({
