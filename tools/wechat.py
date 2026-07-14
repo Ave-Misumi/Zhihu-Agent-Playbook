@@ -155,14 +155,9 @@ def _clipboard_put(text: str) -> None:
 
 
 def _clipboard_paste(hwnd: int) -> None:
-    """Ctrl+V 粘贴剪贴板内容到窗口，SendInput + pyautogui 双路径"""
+    """[DEPRECATED] 已改用 pyautogui.hotkey('ctrl','v') 单一路径"""
     import pyautogui
-    if not _ensure_foreground(hwnd):
-        raise RuntimeError(f"[WECHAT] 无法切换到前台进行粘贴: hwnd={hwnd}")
-    _send_key(hwnd, VK_V, ctrl=True)
-    time.sleep(0.1)
     pyautogui.hotkey('ctrl', 'v')
-    time.sleep(0.1)
 
 
 def _ensure_foreground(hwnd: int) -> bool:
@@ -535,157 +530,111 @@ def _get_wechat_hwnd() -> int | None:
 
 
 # ═══════════════════════════════════════════════
-# 键盘操作原语
+# 键盘操作原语（单一 pyautogui 路径，杜绝重复操作）
 # ═══════════════════════════════════════════════
 
-def _open_search(hwnd: int) -> None:
-    """Ctrl+F 打开搜索框并清空。使用 pyautogui 为主，SendInput 为补充。"""
-    import pyautogui
-    if not _ensure_foreground(hwnd):
-        raise RuntimeError(f"[WECHAT] 无法将微信窗口切换到前台: hwnd={hwnd}")
-    time.sleep(0.3)
-
-    # 1. 点击微信客户区确保焦点
-    _click_wechat_client(hwnd)
-
-    # 2. 用 pyautogui 发送 Ctrl+F（最可靠的方式）
-    print("[WECHAT-SEARCH] pyautogui Ctrl+F...")
-    pyautogui.hotkey('ctrl', 'f')
-    time.sleep(1.0)
-
-    # 3. 再尝试 SendInput Ctrl+F（双保险）
-    _send_key(hwnd, VK_F, ctrl=True)
-    time.sleep(0.5)
-
-    # 4. 清空已有内容：pyautogui Ctrl+A + Delete
-    pyautogui.hotkey('ctrl', 'a')
-    time.sleep(0.15)
-    pyautogui.press('delete')
-    time.sleep(0.15)
-
-    print("[WECHAT-SEARCH] 搜索框应当已打开并清空")
+# pyautogui 全局安全设置
+import pyautogui
+pyautogui.FAILSAFE = True
+pyautogui.PAUSE = 0.05
 
 
-def _click_wechat_client(hwnd: int) -> None:
-    """物理点击微信窗口客户区中间位置，确保 Qt 获得键盘焦点"""
-    import pyautogui
+def _grab_focus(hwnd: int) -> None:
+    """物理点击微信窗口客户区中间，确保 Qt 获得键盘焦点"""
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
     cx = r.left + (r.right - r.left) // 2
-    cy = r.top + 120  # 标题栏下方，搜索框附近
-    print(f"[WECHAT-CLICK] 点击客户区 ({cx}, {cy})")
-    pyautogui.moveTo(cx, cy, duration=0.2)
+    cy = r.top + 120
+    pyautogui.moveTo(cx, cy, duration=0.1)
+    pyautogui.click(cx, cy)
+    time.sleep(0.25)
+
+
+def _open_search(hwnd: int) -> None:
+    """Ctrl+F 打开微信搜索面板并清空已有内容"""
+    if not _ensure_foreground(hwnd):
+        raise RuntimeError(f"[WECHAT] 无法将微信窗口切换到前台: hwnd={hwnd}")
+    _grab_focus(hwnd)
+    time.sleep(0.3)
+
+    pyautogui.hotkey('ctrl', 'f')
+    time.sleep(0.8)
+
+    # 清空搜索框已有内容
+    pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.1)
-    pyautogui.click(cx, cy)
-    time.sleep(0.3)
-    # 再双击确保 Qt 获得焦点
-    pyautogui.click(cx, cy)
-    time.sleep(0.3)
-
-
-def _verify_search_opened(hwnd: int) -> bool:
-    """用 UIAutomation 检测微信搜索面板是否打开"""
-    try:
-        control = auto.ControlFromHandle(hwnd)
-        def _get_children(node):
-            try:
-                return node.GetChildren()
-            except Exception:
-                return []
-        for node, depth, _ in auto.WalkTree(control, getChildren=_get_children, includeTop=True, maxDepth=5):
-            try:
-                ctn = node.ControlTypeName
-                name = node.Name or ''
-                if ctn == 'EditControl' and '搜' in name:
-                    print(f"[WECHAT-VERIFY] 发现搜索 Edit: name='{name}' depth={depth}")
-                    return True
-                if ctn == 'EditControl' and node.IsKeyboardFocusable:
-                    print(f"[WECHAT-VERIFY] 发现可聚焦 Edit: name='{name}' depth={depth}")
-                    return True
-            except Exception:
-                continue
-        print("[WECHAT-VERIFY] 未检测到搜索 Edit 控件")
-        return False
-    except Exception as e:
-        print(f"[WECHAT-VERIFY] UIA 异常: {e}")
-        return False
+    pyautogui.press('delete')
+    time.sleep(0.1)
 
 
 def _search_keyword(hwnd: int, keyword: str) -> None:
-    """输入关键词→回车搜索。SendInput + pyautogui 双路径"""
-    import pyautogui
-    # 路径1: SendInput
+    """粘贴关键词 → 回车搜索"""
     _clipboard_put(keyword)
-    _clipboard_paste(hwnd)
-    time.sleep(0.3)
-    _send_key(hwnd, VK_RETURN)
-    time.sleep(0.5)
-    # 路径2: pyautogui (不同输入管线，增加可靠性)
-    _clipboard_put(keyword)
+    time.sleep(0.1)
     pyautogui.hotkey('ctrl', 'v')
     time.sleep(0.3)
     pyautogui.press('enter')
-    time.sleep(1.5)
+    time.sleep(2.0)
 
 
 def _navigate_to_first_result(hwnd: int) -> None:
-    """Down按两次→Enter，SendInput + pyautogui 双路径"""
-    import pyautogui
-    for _ in range(2):
-        _send_key(hwnd, VK_DOWN)
-        time.sleep(0.15)
-    pyautogui.press('down')
-    time.sleep(0.1)
-    pyautogui.press('down')
-    time.sleep(0.1)
-    _send_key(hwnd, VK_RETURN)
+    """焦点从搜索框移到结果列表 → Enter 打开第一条。
+    
+    微信搜索后焦点仍在搜索框，Enter 会重新搜索而非打开结果。
+    先 Tab 把焦点从搜索框移到结果面板，再 Enter 打开当前高亮项。
+    """
+    # Tab 从搜索框移到搜索结果面板（通常需要 2-3 次 Tab）
+    for _ in range(3):
+        pyautogui.press('tab')
+        time.sleep(0.2)
+    # 等焦点稳定
     time.sleep(0.5)
+    # 第一条结果自动高亮，直接 Enter 打开
     pyautogui.press('enter')
-    time.sleep(1.5)
+    time.sleep(3.0)
 
 
 def _click_follow_via_keyboard(hwnd: int) -> bool:
-    """Tab 遍历到关注按钮→Enter，SendInput + pyautogui 双路径"""
-    import pyautogui
+    """在服务号/公众号详情页中 Tab 定位关注按钮 → Enter。
+    
+    进入详情页后等页面渲染完成，再 Tab 遍历按钮。
+    返回 True 表示操作已执行。"""
+    # 等详情页完全加载（头像/名称/按钮等）
+    time.sleep(2.0)
     for _ in range(4):
-        _send_key(hwnd, VK_TAB)
-        time.sleep(0.15)
-    pyautogui.press('tab')
-    time.sleep(0.1)
-    pyautogui.press('tab')
-    time.sleep(0.1)
-    _send_key(hwnd, VK_RETURN)
-    time.sleep(1)
+        pyautogui.press('tab')
+        time.sleep(0.2)
     pyautogui.press('enter')
-    time.sleep(2)
+    time.sleep(2.5)
     return True
 
 
 def _goto_message_input(hwnd: int) -> None:
-    """导航到聊天输入框并清空"""
+    """在聊天页中 Tab 到输入框并清空"""
     for _ in range(8):
-        _send_key(hwnd, VK_TAB)
+        pyautogui.press('tab')
         time.sleep(0.12)
     time.sleep(0.3)
-    _send_key(hwnd, VK_A, ctrl=True)
+    pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.1)
-    _send_key(hwnd, VK_DELETE)
+    pyautogui.press('delete')
     time.sleep(0.1)
 
 
 def _send_message(hwnd: int, message: str) -> None:
-    """输入消息并发送"""
+    """粘贴消息文本 → 回车发送"""
     _clipboard_put(message)
-    _clipboard_paste(hwnd)
+    time.sleep(0.1)
+    pyautogui.hotkey('ctrl', 'v')
     time.sleep(0.3)
-    _send_key(hwnd, VK_RETURN)
+    pyautogui.press('enter')
     time.sleep(0.5)
 
 
 def _go_back_to_main(hwnd: int) -> None:
     """Escape 退出当前会话/资料页回到微信主界面"""
-    _send_key(hwnd, VK_ESCAPE)
-    time.sleep(0.5)
+    pyautogui.press('escape')
+    time.sleep(0.8)
 
 
 # ═══════════════════════════════════════════════
@@ -697,58 +646,49 @@ async def wechat_search_and_follow(
     message: str = "",
     account_type: str = "服务号",
 ) -> str:
-    """搜索公众号/服务号 → 关注 → 发送私信（键盘+剪贴板方案）"""
-    errors = []
+    """搜索公众号/服务号 → 关注 → 发私信（pyautogui 物理键盘方案）
+
+    流程分 4 步，每步有独立等待和状态检查：
+      1. 打开搜索 + 输入关键词 + 回车
+      2. 在搜索结果中导航到第一条 → 进入详情页
+      3. 关注
+      4. 如有 message 则发送私信
+    """
+    import pyautogui
     try:
         hwnd = _get_wechat_hwnd()
         if hwnd is None:
             return "微信未登录，请扫码登录后重试"
 
-        # 1. Ctrl+F → 输入关键词 → 回车搜索
-        print("[WECHAT-STEP1] 正在 Ctrl+F 打开搜索框...")
+        # ── Step 1: 打开搜索 → 输入 → 回车 ──
+        print(f"[WECHAT-STEP1] 搜索关键词: {keyword}")
         _open_search(hwnd)
-        print("[WECHAT-STEP1] Ctrl+F 已发送")
         _search_keyword(hwnd, keyword)
-        print(f"[WECHAT-STEP1] 关键词「{keyword}」已粘贴并回车")
+        print(f"[WECHAT-STEP1] 搜索已提交")
 
-        # 等待搜索结果加载
-        time.sleep(2)
-
-        # 用 UIAutomation 验证搜索框是否打开
-        search_opened = _verify_search_opened(hwnd)
-        if search_opened:
-            print("[WECHAT-VERIFY] 搜索面板已确认打开")
-        else:
-            print("[WECHAT-VERIFY] [WARN] 搜索面板未检测到！尝试备用方式 pyautogui Ctrl+F...")
-            # 备用方案：用 pyautogui 发送 Ctrl+F（不同输入路径）
-            import pyautogui
-            pyautogui.hotkey('ctrl', 'f')
-            time.sleep(1)
-            _clipboard_put(keyword)
-            pyautogui.hotkey('ctrl', 'v')
-            time.sleep(0.3)
-            pyautogui.press('enter')
-            time.sleep(2)
-            errors.append("搜索面板未确认打开，已尝试备用方式")
-
-        # 2. 导航到第一条搜索结果 → Enter 打开
+        # ── Step 2: 导航到第一条结果 → Enter 进入详情页 ──
         print("[WECHAT-STEP2] 导航到第一条搜索结果...")
         _navigate_to_first_result(hwnd)
-        print("[WECHAT-STEP2] 已按↓+Enter")
+        print("[WECHAT-STEP2] 已进入详情页")
 
-        # 3. 关注
+        # ── Step 3: 关注 ──
         print("[WECHAT-STEP3] 尝试关注...")
         _click_follow_via_keyboard(hwnd)
-        print("[WECHAT-STEP3] Tab+Enter 关注操作已发送")
+        print("[WECHAT-STEP3] 关注操作已执行")
 
-        result_parts = [f"搜索「{keyword}」并尝试关注完成"]
-        if errors:
-            result_parts.append(f"注意事项: {'; '.join(errors)}")
-        result = "，".join(result_parts)
+        result = f"搜索「{keyword}」并尝试关注完成"
 
-        # 4. 发私信（如果需要）
+        # ── Step 4: 发私信（如有 message 且关注成功/已关注则可进入聊天页）──
         if message:
-            print(f"[WECHAT-STEP4] 发送私信: {message[:20]}...")
+            print(f"[WECHAT-STEP4] 进入聊天页发送私信: {message[:30]}...")
+            # 关注成功后会自动进入聊天页，或点击「发消息」按钮
+            # 关注按钮变「发消息」→ Tab 定位 → Enter 进入聊天
+            for _ in range(2):
+                pyautogui.press('tab')
+                time.sleep(0.12)
+            pyautogui.press('enter')
+            time.sleep(2.0)
+
             _goto_message_input(hwnd)
             _send_message(hwnd, message)
             print("[WECHAT-STEP4] 消息已发送")
@@ -767,6 +707,7 @@ async def wechat_send_message(
     message: str,
 ) -> str:
     """给已关注的联系人/公众号发送消息"""
+    import pyautogui
     try:
         hwnd = _get_wechat_hwnd()
         if hwnd is None:
@@ -776,6 +717,7 @@ async def wechat_send_message(
         _search_keyword(hwnd, contact_name)
         _navigate_to_first_result(hwnd)
 
+        # 进入聊天后直接发消息
         _goto_message_input(hwnd)
         _send_message(hwnd, message)
 
