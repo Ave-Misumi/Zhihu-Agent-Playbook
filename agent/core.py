@@ -8,8 +8,7 @@ from browser_use.browser.session import BrowserSession
 from browser_use.browser.profile import BrowserProfile
 from browser_use.tools.service import Tools
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain.agents import create_agent
 from langchain_core.tools import tool as langchain_tool
 
 from config import get_llm, get_raw_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR, set_agent_mode
@@ -200,24 +199,12 @@ wechat_send_message_langchain = langchain_tool(wechat_send_message)
 # ═══════════════════════════════════════════════════════════
 
 def _create_tool_agent_executor(tools, system_prompt: str, max_iterations: int = 6):
-    """构造 LangChain Tool Calling Agent 执行器(使用原生 ChatOpenAI)"""
+    """构造 LangChain Agent (LangGraph StateGraph, LangChain 1.x 新 API)"""
     llm = get_raw_llm()
-    # Tool calling agent 的 prompt 必须包含 input 和 agent_scratchpad
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            ("human", "{input}"),
-            MessagesPlaceholder("agent_scratchpad"),
-        ]
-    )
-    agent = create_tool_calling_agent(llm, tools, prompt)
-    return AgentExecutor(
-        agent=agent,
+    return create_agent(
+        model=llm,
         tools=tools,
-        verbose=True,
-        max_iterations=max_iterations,
-        handle_parsing_errors=True,
-        return_intermediate_steps=True,
+        system_prompt=system_prompt,
     )
 
 
@@ -286,10 +273,10 @@ async def create_wps_agent(task: str):
     ]
     # 注入最新模板：命中则预填参数，省掉一次工具往返
     prompt = _build_wps_prompt(task)
-    executor = _create_tool_agent_executor(
+    agent_graph = _create_tool_agent_executor(
         tools, prompt, max_iterations=6
     )
-    return executor, task
+    return agent_graph, task
 
 
 async def create_wechat_agent(task: str):
@@ -299,7 +286,7 @@ async def create_wechat_agent(task: str):
         wechat_search_and_follow_langchain,
         wechat_send_message_langchain,
     ]
-    executor = _create_tool_agent_executor(
+    agent_graph = _create_tool_agent_executor(
         tools, WECHAT_SYSTEM_PROMPT, max_iterations=8
     )
-    return executor, task
+    return agent_graph, task

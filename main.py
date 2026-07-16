@@ -60,18 +60,32 @@ async def run_zhihu(user_task: str):
 async def run_wps(user_task: str):
     from agent.core import create_wps_agent
     print(f"==> WPS 模式 | LangChain ReAct Agent | 你说: {user_task}")
-    executor, task = await create_wps_agent(user_task)
-    result = await executor.ainvoke({"input": task})
-    print(f"==> 完成！\n{result.get('output', '无输出')}")
+    agent_graph, task = await create_wps_agent(user_task)
+    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
+    # 提取最后一条 AI 消息作为结果
+    output = "无输出"
+    if "messages" in result:
+        for msg in reversed(result["messages"]):
+            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
+                output = msg.content
+                break
+    print(f"==> 完成！\n{output}")
     return result
 
 
 async def run_wechat(user_task: str):
     from agent.core import create_wechat_agent
     print(f"==> 微信模式 | LangChain ReAct Agent | 你说: {user_task}")
-    executor, task = await create_wechat_agent(user_task)
-    result = await executor.ainvoke({"input": task})
-    print(f"==> 完成！\n{result.get('output', '无输出')}")
+    agent_graph, task = await create_wechat_agent(user_task)
+    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
+    # 提取最后一条 AI 消息作为结果
+    output = "无输出"
+    if "messages" in result:
+        for msg in reversed(result["messages"]):
+            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
+                output = msg.content
+                break
+    print(f"==> 完成！\n{output}")
     return result
 
 
