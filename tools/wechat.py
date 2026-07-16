@@ -759,15 +759,37 @@ def _click_send_msg_button(hwnd: int) -> None:
 
 
 def _goto_message_input(hwnd: int) -> None:
-    """在聊天页中 Tab 到输入框并清空"""
-    for _ in range(8):
-        pyautogui.press('tab')
-        time.sleep(0.12)
-    time.sleep(0.3)
-    pyautogui.hotkey('ctrl', 'a')
-    time.sleep(0.1)
-    pyautogui.press('delete')
-    time.sleep(0.1)
+    """在私信窗口中点击右下角键盘按钮，切换到输入框模式。
+
+    从截图看，窗口底部有菜单栏（产品介绍、操作视频、联系我们），
+    右下角有一个键盘图标按钮，点击后才会出现输入框。
+    """
+    import pyautogui
+    time.sleep(2.0)
+
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    win_w = r.right - r.left
+    win_h = r.bottom - r.top
+
+    # 键盘按钮在右下角，约在窗口右边缘 -40px，底部 -40px 处
+    cx = r.right - 40
+    cy = r.bottom - 40
+
+    print(f"[WECHAT] 私信窗口 {win_w}x{win_h} at ({r.left},{r.top}), 键盘按钮估计位置: ({cx}, {cy})")
+
+    pyautogui.moveTo(cx, cy, duration=0.15)
+    pyautogui.click(cx, cy)
+    time.sleep(1.5)
+
+    # 点击键盘按钮后，应该出现输入框
+    # 输入框通常在底部，约在窗口底部往上 50px 处
+    input_cx = r.left + win_w // 2
+    input_cy = r.bottom - 50
+    print(f"[WECHAT] 输入框估计位置: ({input_cx}, {input_cy})")
+    pyautogui.moveTo(input_cx, input_cy, duration=0.15)
+    pyautogui.click(input_cx, input_cy)
+    time.sleep(0.5)
 
 
 def _send_message(hwnd: int, message: str) -> None:
