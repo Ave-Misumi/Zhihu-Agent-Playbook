@@ -1,18 +1,31 @@
 """微信（Windows 客户端）自动化工具集
 
-纯 Win32 SendInput / PostMessage + 剪贴板方案。
+纯 Win32 SendInput / PostMessage + 剪贴板方案，结合视觉辅助定位。
 支持新版 Weixin（Qt 渲染，无原生子控件）和老版 WeChat。
 
 功能：
   - wechat_search_and_follow   搜索公众号/服务号 → 关注 → 发私信
   - wechat_send_message        给已关注的公众号发送文字消息
+
+视觉辅助：
+  - 截图检测搜索结果（OCR 或固定区域）
+  - 服务号详情页自动检测「关注」/「私信」按钮位置
 """
 import os
 import time
 import ctypes
 from ctypes import wintypes
+from pathlib import Path
 
-import uiautomation as auto
+from .wechat_vision import (
+    capture_window,
+    find_template_center,
+    find_green_button,
+    find_text_center,
+    save_template_from_window,
+    visualize_detection,
+    DEFAULT_TEMPLATE_DIR,
+)
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -529,6 +542,32 @@ def _get_wechat_hwnd() -> int | None:
     return None
 
 
+def _window_client_to_screen(hwnd: int, client_x: int, client_y: int) -> tuple[int, int]:
+    """将窗口客户区坐标转换为屏幕坐标。"""
+    pt = wintypes.POINT(client_x, client_y)
+    user32.ClientToScreen(hwnd, ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+def _safe_ensure_foreground(hwnd: int) -> bool:
+    """尝试把窗口切到前台，失败不抛异常。"""
+    try:
+        return _ensure_foreground(hwnd)
+    except Exception as e:
+        print(f"[WECHAT] 切换前台失败: {e}")
+        return False
+
+
+def _click_at(hwnd: int, client_x: int, client_y: int, duration: float = 0.15) -> None:
+    """在窗口客户区指定坐标处点击（视觉定位结果用）。"""
+    import pyautogui
+    sx, sy = _window_client_to_screen(hwnd, client_x, client_y)
+    _safe_ensure_foreground(hwnd)
+    pyautogui.moveTo(sx, sy, duration=duration)
+    pyautogui.click(sx, sy)
+    time.sleep(0.2)
+
+
 # ═══════════════════════════════════════════════
 # 键盘操作原语（单一 pyautogui 路径，杜绝重复操作）
 # ═══════════════════════════════════════════════
@@ -593,22 +632,62 @@ def _navigate_to_first_result(hwnd: int) -> None:
     time.sleep(3.0)
 
 
-def _click_first_search_result(hwnd: int) -> bool:
+def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
     """在 Qt 微信搜索结果窗口中点击第一条结果，然后切换到新弹出的详情窗口。
 
-    Qt 微信 UIA 看不到控件文字，必须用屏幕坐标。
-    点击后会弹出一个新窗口（如「服务号」窗口），需要检测并返回新窗口的 hwnd。
+    视觉优先：
+      1. 先截图 + OCR 检测关键词位置（如「火眼审阅」）
+      2. 未找到则按固定第一条结果区域点击
     """
     import pyautogui
     time.sleep(3.0)
 
-    # 获取窗口位置和大小
+    if not _safe_ensure_foreground(hwnd):
+        print("[WECHAT] 搜索结果窗口无法前台， fallback 使用固定坐标")
+
+    # 获取窗口客户区
+    img = capture_window(hwnd, client_only=True)
+    if img is None or img.size == 0:
+        return False
+
+    target_point = None
+
+    # 1. OCR 找关键词（如果 keyword 非空）
+    if keyword:
+        try:
+            target_point = find_text_center(img, keyword)
+            if target_point:
+                print(f"[WECHAT] OCR 定位到关键词「{keyword}」: {target_point}")
+        except Exception as e:
+            print(f"[WECHAT] OCR 失败，将使用固定位置: {e}")
+
+    # 2. 未命中则使用固定区域（第一条结果大约在客户区中上部）
+    if target_point is None:
+        h, w = img.shape[:2]
+        target_point = (w // 2, int(h * 0.25))
+        print(f"[WECHAT] 使用固定第一条结果位置: {target_point}")
+
+    # 调试截图
+    visualize_detection(img, target_point, save_path=Path("debug_search_result.png"))
+
+    # 点击目标位置
+    _click_at(hwnd, target_point[0], target_point[1])
+    time.sleep(0.6)
+    pyautogui.press('enter')
+    time.sleep(3.0)
+    return True
+
+
+def _click_first_search_result_legacy(hwnd: int) -> bool:
+    """旧版固定坐标点击（兼容用）。"""
+    import pyautogui
+    time.sleep(3.0)
+
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
     win_w = r.right - r.left
     win_h = r.bottom - r.top
 
-    # 第一条结果的大致中心位置
     cx = r.left + win_w // 2
     cy = r.top + 180
 
@@ -667,58 +746,100 @@ def _find_new_window_by_title(
 
 
 def _click_follow_in_detail_window(hwnd: int) -> None:
-    """在「服务号」详情窗口中点击绿色「关注」按钮。
+    """在「服务号」详情窗口中点击「关注」按钮。
 
-    从用户反馈精确调整：
-      - y 轴坐标正确（按钮在简介文字下方）
-      - x 轴需要再向右偏移 20px
-      - 按钮约在窗口左侧 + 200px 处
+    视觉优先：
+      1. 模板匹配 assets/wechat_templates/follow_button.png
+      2. 颜色检测（绿色按钮）
+      3. 失败时使用默认坐标兜底
     """
     import pyautogui
     time.sleep(2.0)
 
-    r = wintypes.RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(r))
-    win_w = r.right - r.left
-    win_h = r.bottom - r.top
+    _safe_ensure_foreground(hwnd)
+    target = _find_button_by_vision(hwnd, "follow_button.png", prefer_right=False)
+    if target is None:
+        # 兜底：默认坐标
+        r = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(r))
+        cx = r.left + 200
+        cy = r.top + 350
+        print(f"[WECHAT] 详情窗口使用默认关注按钮位置: ({cx}, {cy})")
+        sx, sy = cx, cy
+    else:
+        cx, cy = target
+        sx, sy = _window_client_to_screen(hwnd, cx, cy)
+        print(f"[WECHAT] 视觉定位关注按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
 
-    # 按钮位置：x=200（再向右20px），y=350
-    cx = r.left + 200
-    cy = r.top + 350
-
-    print(f"[WECHAT] 详情窗口 {win_w}x{win_h} at ({r.left},{r.top}), 关注按钮估计位置: ({cx}, {cy})")
-
-    pyautogui.moveTo(cx, cy, duration=0.15)
-    pyautogui.click(cx, cy)
+    pyautogui.moveTo(sx, sy, duration=0.15)
+    pyautogui.click(sx, sy)
     time.sleep(2.5)
 
 
 def _click_send_msg_in_detail_window(hwnd: int) -> None:
     """关注成功后，在详情窗口中点击「私信」按钮。
 
-    从截图看，关注后界面显示：
-      - 左侧：「已关注」按钮（灰色）
-      - 右侧：「私信」按钮（绿色）
-      - 私信按钮在关注按钮右边，约在窗口左侧 + 280px 处
-      - y 坐标与关注按钮相同（约 350）
+    视觉优先：
+      1. 模板匹配 assets/wechat_templates/send_msg_button.png
+      2. 颜色检测（绿色按钮）
+      3. 失败时使用默认坐标兜底
     """
     import pyautogui
     time.sleep(1.5)
 
-    r = wintypes.RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(r))
-    win_w = r.right - r.left
-    win_h = r.bottom - r.top
+    _safe_ensure_foreground(hwnd)
+    target = _find_button_by_vision(hwnd, "send_msg_button.png", prefer_right=True)
+    if target is None:
+        # 兜底：默认坐标
+        r = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(r))
+        cx = r.left + 350
+        cy = r.top + 350
+        print(f"[WECHAT] 详情窗口使用默认私信按钮位置: ({cx}, {cy})")
+        sx, sy = cx, cy
+    else:
+        cx, cy = target
+        sx, sy = _window_client_to_screen(hwnd, cx, cy)
+        print(f"[WECHAT] 视觉定位私信按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
 
-    # 私信按钮在关注按钮右边，x 偏移约 +150px
-    cx = r.left + 350
-    cy = r.top + 350
-
-    print(f"[WECHAT] 详情窗口 {win_w}x{win_h} at ({r.left},{r.top}), 私信按钮估计位置: ({cx}, {cy})")
-
-    pyautogui.moveTo(cx, cy, duration=0.15)
-    pyautogui.click(cx, cy)
+    pyautogui.moveTo(sx, sy, duration=0.15)
+    pyautogui.click(sx, sy)
     time.sleep(2.5)
+
+
+def _find_button_by_vision(hwnd: int, template_name: str, prefer_right: bool = False) -> tuple[int, int] | None:
+    """视觉查找按钮，返回客户区坐标。
+
+    策略：
+      1. 模板匹配（如果模板存在）
+      2. 检测窗口中的绿色按钮
+      3. 如果 prefer_right=True，在多个绿色按钮中选偏右的；否则选偏左的
+    """
+    try:
+        img = capture_window(hwnd, client_only=True)
+    except Exception as e:
+        print(f"[WECHAT-VISION] 截图失败: {e}")
+        return None
+
+    if img is None or img.size == 0:
+        return None
+
+    template_path = DEFAULT_TEMPLATE_DIR / template_name
+    if template_path.exists():
+        center = find_template_center(img, template_path, confidence=0.75)
+        if center:
+            print(f"[WECHAT-VISION] 模板匹配成功: {template_name} -> {center}")
+            visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_{template_name}")
+            return center
+
+    # 颜色检测：找绿色按钮
+    center = find_green_button(img)
+    if center:
+        print(f"[WECHAT-VISION] 颜色检测定位绿色按钮: {center}")
+        visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_color_{template_name}")
+        return center
+
+    return None
 
 
 # 旧 UIA 文本搜索（Qt 下无效，保留仅供参考）
@@ -839,7 +960,7 @@ async def wechat_search_and_follow(
 
         # ── Step 2: 在搜索结果窗口中点击第一条结果 ──
         print(f"[WECHAT-STEP2] 等待搜索结果窗口渲染...")
-        _click_first_search_result(hwnd)
+        _click_first_search_result(hwnd, keyword=keyword)
         print("[WECHAT-STEP2] 已点击第一条结果，等待新窗口弹出...")
 
         # 检测新弹出的「服务号」详情窗口
