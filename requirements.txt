@@ -2,3 +2,6 @@ browser-use[core]
 langchain-openai
 langchain-community
 playwright
+json_repair
+uiautomation
+pywin32

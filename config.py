@@ -912,6 +912,25 @@ class BridgeLLM:
                     if k in act:
                         act.pop(k)
                         print(f"[WARN] Mode=wechat, removed {k} (not registered)")
+                # wechat 模式下，LLM 可能把 wechat_* 工具包在 evaluate 里当 JS 调用 → 自动解包
+                if "evaluate" in act:
+                    code = str(act.get("evaluate", ""))
+                    for tool_name in ("wechat_search_and_follow", "wechat_send_message"):
+                        if tool_name in code:
+                            m = re.search(rf'{tool_name}\(\{{(.+?)\}}\)', code, re.DOTALL)
+                            if m:
+                                try:
+                                    params = {}
+                                    for kv_match in re.finditer(r"(\w+):\s*['\"]([^'\"]+)['\"]", m.group(1)):
+                                        params[kv_match.group(1)] = kv_match.group(2)
+                                    if params:
+                                        act = dict(act)
+                                        act.pop("evaluate", None)
+                                        act[tool_name] = params
+                                        print(f"[WARN] Mode=wechat, unwrapped evaluate → {tool_name}")
+                                        break
+                                except Exception:
+                                    pass
 
             # 9) 修复 ask_human_for_intervention: Qwen 常输出字符串而非 {reason:...}
             if "ask_human_for_intervention" in act:
@@ -1012,6 +1031,16 @@ class BridgeLLM:
                     del act["replace_file"]
                     act["write_file"] = new_inner
                     print("[WARN] Auto-converted replace_file → write_file")
+
+            # 12c) 修复 done 缺 text：单引号导致 JSON 解析丢失 text 字段时自动填充
+            if "done" in act and isinstance(act["done"], dict):
+                done_inner = act["done"]
+                if "text" not in done_inner or not done_inner.get("text"):
+                    done_inner = dict(done_inner)
+                    done_inner["text"] = data.get("memory", data.get("thinking", "任务完成"))
+                    act = dict(act)
+                    act["done"] = done_inner
+                    print("[WARN] Auto-filled missing done.text")
 
             cleaned.append(act)
 
@@ -1125,7 +1154,7 @@ class BridgeLLM:
 
 
 def get_llm():
-    """创建并返回配置好的 LLM 实例"""
+    """创建并返回配置好的 LLM 实例（browser-use 兼容包装）"""
     from langchain_openai import ChatOpenAI
     
     # 运行时验证配置（导入时不验证，允许预加载模块）
@@ -1141,6 +1170,23 @@ def get_llm():
         max_tokens=8192,
     )
     return BridgeLLM(inner)
+
+
+def get_raw_llm():
+    """返回原生 LangChain ChatOpenAI 实例（用于 ReAct 等非 browser-use 场景）"""
+    from langchain_openai import ChatOpenAI
+    
+    _validate_config()
+    
+    return ChatOpenAI(
+        model=LLM_MODEL,
+        base_url=LLM_BASE_URL,
+        api_key=LLM_API_KEY,
+        temperature=0.3,
+        timeout=180,
+        max_retries=2,
+        max_tokens=8192,
+    )
 
 
 # ==========================================

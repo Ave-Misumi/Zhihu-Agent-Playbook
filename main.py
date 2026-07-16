@@ -1,13 +1,14 @@
 """Zhihu-Agent-Playbook 主入口
 
-用法:
-    python main.py                                                 # 知乎：发文章 + 评论 + 收藏
-    python main.py "帮我在知乎上搜一下AI Agent相关的文章"            # 知乎：自定义任务
-    python main.py "帮我写篇AI文章排版导出PDF"                       # WPS：自然语言驱动
-    python main.py "用WPS写个工作周报，要有本周进展和下周计划"          # WPS：各种说法都可以
-    python main.py "帮我搜索微信服务号火眼审阅并关注发私信"             # 微信：自然语言驱动
+知乎链路使用 browser-use Agent；WPS / 微信链路使用 LangChain ReAct Agent。
 
-启动时自动判断：用户自然语言属于哪种意图 → 路由到对应链路（知乎 / WPS / 微信）。
+用法:
+    python main.py                                                 # 知乎默认任务
+    python main.py "帮我在知乎上搜一下AI Agent相关的文章"            # 知乎
+    python main.py "帮我写篇AI文章排版导出PDF"                       # WPS
+    python main.py "用WPS写个工作周报，要有本周进展和下周计划"          # WPS
+    python main.py "帮我搜索微信服务号火眼审阅并关注发私信"             # 微信
+    python main.py "打开微信搜索服务号火眼审阅，关注后发私信：你好，这是一条测试消息"  # 微信
 """
 import os
 import sys
@@ -33,22 +34,22 @@ WECHAT_KEYWORDS = [
 
 def _route_intent(text: str) -> str:
     """返回 "zhihu" | "wps" | "wechat" """
-    # 知乎特征词 → 优先
-    if any(kw in text for kw in ["知乎", "zhihu", "浏览", "搜索", "评论", "收藏", "点赞"]):
-        return "zhihu"
-    # 微信特征词
-    if any(kw in text for kw in WECHAT_KEYWORDS):
+    # 微信特征词优先
+    if any(kw in text for kw in WECHAT_KEYWORDS) and any(kw in text for kw in ["微信", "wechat", "WeChat"]):
         return "wechat"
     # WPS 特征词
     if any(kw in text for kw in WPS_KEYWORDS):
         return "wps"
+    # 知乎特征词
+    if any(kw in text for kw in ["知乎", "zhihu", "浏览", "搜索", "评论", "收藏", "点赞"]):
+        return "zhihu"
     # 默认知乎
     return "zhihu"
 
 
 async def run_zhihu(user_task: str):
     from agent.core import create_zhihu_agent
-    print(f"==> 知乎模式 | 你说: {user_task}")
+    print(f"==> 知乎模式 | browser-use Agent | 你说: {user_task}")
     agent = await create_zhihu_agent(user_task)
     print("==> 浏览器已启动，Agent 开始执行...")
     history = await agent.run()
@@ -58,20 +59,34 @@ async def run_zhihu(user_task: str):
 
 async def run_wps(user_task: str):
     from agent.core import create_wps_agent
-    print(f"==> WPS 模式 | 你说: {user_task}")
-    agent = await create_wps_agent(user_task)
-    history = await agent.run()
-    print(f"==> 完成！共 {len(history)} 步。")
-    return history
+    print(f"==> WPS 模式 | LangChain ReAct Agent | 你说: {user_task}")
+    agent_graph, task = await create_wps_agent(user_task)
+    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
+    # 提取最后一条 AI 消息作为结果
+    output = "无输出"
+    if "messages" in result:
+        for msg in reversed(result["messages"]):
+            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
+                output = msg.content
+                break
+    print(f"==> 完成！\n{output}")
+    return result
 
 
 async def run_wechat(user_task: str):
     from agent.core import create_wechat_agent
-    print(f"==> 微信模式 | 你说: {user_task}")
-    agent = await create_wechat_agent(user_task)
-    history = await agent.run()
-    print(f"==> 完成！共 {len(history)} 步。")
-    return history
+    print(f"==> 微信模式 | LangChain ReAct Agent | 你说: {user_task}")
+    agent_graph, task = await create_wechat_agent(user_task)
+    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
+    # 提取最后一条 AI 消息作为结果
+    output = "无输出"
+    if "messages" in result:
+        for msg in reversed(result["messages"]):
+            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
+                output = msg.content
+                break
+    print(f"==> 完成！\n{output}")
+    return result
 
 
 async def main():

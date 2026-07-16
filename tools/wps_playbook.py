@@ -116,6 +116,11 @@ def _guess_template_type(title: str, body_md: str) -> str:
 
 # ── 模板存储 ──
 
+def _make_template_key(template_type: str, title: str) -> str:
+    """生成复合键: 类型::标题（同类型不同主题不互相覆盖）"""
+    return f"{template_type}:::{title}"
+
+
 def _save_template(
     template_type: str,
     title: str,
@@ -128,14 +133,14 @@ def _save_template(
     body_size: str,
     line_spacing: str,
 ) -> None:
-    """保存模板到缓存"""
+    """保存模板到缓存（用类型+标题复合键，不同主题不覆盖）"""
     templates = _load_templates()
 
-    templates[template_type] = {
+    key = _make_template_key(template_type, title)
+    templates[key] = {
         "type": template_type,
-        "updated": "",  # 会被覆盖
-        "example_title": title,
-        "example_skeleton": _extract_skeleton(body_md),
+        "title": title,
+        "skeleton": _extract_skeleton(body_md),
         "formatting": {
             "title_font": title_font,
             "title_size": title_size,
@@ -148,7 +153,7 @@ def _save_template(
     }
 
     from datetime import datetime
-    templates[template_type]["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    templates[key]["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     _save_templates(templates)
 
@@ -161,23 +166,31 @@ async def get_wps_template(
     """
     查询 WPS 文档模板缓存。
 
-    返回 JSON：命中 → 含 formatting(排版参数) + example_skeleton(章节骨架)
+    返回 JSON：命中 → 该类型最新一条模板（含 title/skeleton/formatting/updated）
             未命中 → {"status":"no_template","message":"..."}
+
+    同类文章排版参数相同，只返回最新一条，LLM 拿到后直接复用。
     """
     templates = _load_templates()
-    tmpl = templates.get(template_type)
-    if tmpl:
-        fmt = tmpl.get("formatting", {})
-        skeleton = tmpl.get("example_skeleton", [])
-        print(f"[WPS-PLAYBOOK] HIT  template_type={template_type} | "
-              f"formatting={fmt.get('title_font')} {fmt.get('title_size')}/{fmt.get('body_font')} {fmt.get('body_size')}/{fmt.get('line_spacing')}pt | "
-              f"skeleton={len(skeleton)} sections | updated={tmpl.get('updated')}")
-        return json.dumps(tmpl, ensure_ascii=False, indent=2)
-    print(f"[WPS-PLAYBOOK] MISS template_type={template_type} | returning guidance to create from scratch")
-    return json.dumps({
-        "status": "no_template",
-        "message": '没有"' + template_type + '"类型的缓存模板。请使用用户指定的排版参数从头创作。默认：标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅。'
-    }, ensure_ascii=False)
+    prefix = _make_template_key(template_type, "")
+    matches = [
+        v for k, v in templates.items()
+        if k.startswith(prefix)
+    ]
+    if not matches:
+        print(f"[WPS-PLAYBOOK] MISS template_type={template_type} | returning guidance")
+        return json.dumps({
+            "status": "no_template",
+            "message": f"没有「{template_type}」类型的缓存模板。请使用默认排版参数从头创作：标题黑体小二居中加粗，小节黑体小三加粗，正文宋体小四首行缩进2字符行距28磅。"
+        }, ensure_ascii=False, indent=2)
+
+    latest = matches[0]
+    fmt = latest.get("formatting", {})
+    print(f"[WPS-PLAYBOOK] HIT  template_type={template_type} | "
+          f"\"{latest.get('title','')}\" | "
+          f"{fmt.get('title_font')} {fmt.get('title_size')}/{fmt.get('body_font')} {fmt.get('body_size')}/{fmt.get('line_spacing')}pt | "
+          f"updated={latest.get('updated')}")
+    return json.dumps(latest, ensure_ascii=False, indent=2)
 
 
 def auto_save_wps_template(
