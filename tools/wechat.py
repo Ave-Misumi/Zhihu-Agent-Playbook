@@ -578,171 +578,92 @@ def _search_keyword(hwnd: int, keyword: str) -> None:
 
 
 def _navigate_to_first_result(hwnd: int) -> None:
-    """[DEPRECATED] 已被 _click_search_result_by_name 替代。
-    旧逻辑：盲操 ↓ 箭头选中第一条，但对服务号搜索不可靠。"""
-    # 保留作为键盘兜底：在搜索结果窗口中使用 ↓ 导航
+    """键盘导航兜底：在搜索结果窗口中选择第一条结果并打开。"""
+    # 等搜索结果窗口渲染完成
+    time.sleep(2.0)
+    # Tab 离开搜索框，把焦点移到结果列表
+    pyautogui.press('tab')
+    time.sleep(0.3)
+    pyautogui.press('tab')
+    time.sleep(0.3)
+    # ↓ 选中第一条
     pyautogui.press('down')
     time.sleep(0.3)
-    pyautogui.press('down')
-    time.sleep(0.5)
     pyautogui.press('enter')
     time.sleep(3.0)
 
 
-def _click_search_result_by_name(hwnd: int, keyword: str) -> bool:
-    """在搜索结果中用 UIAutomation 查找并点击名称匹配的条目。
+def _click_first_search_result(hwnd: int) -> bool:
+    """在 Qt 微信搜索结果窗口中直接点击第一条结果。
 
-    新版微信 Qt 搜索结果以 ListItem/Text 控件呈现。
-    本函数搜索主窗口子树，找到名称包含 keyword 的控件后点击其中心。
-    返回 True 表示成功点击，False 表示未找到（调用方应 fallback）。
+    Qt 微信 UIA 看不到控件文字，必须用屏幕坐标。
+    利用搜索结果布局的固定性：第一条结果在搜索框+Tab栏下方约 170px 处。
+    先鼠标点击结果区域确保焦点，再 Enter 打开。
     """
     import pyautogui
-    time.sleep(3.0)  # 等搜索结果窗口完全渲染
+    # 等搜索结果窗口完全渲染
+    time.sleep(3.0)
 
-    try:
-        main_ctrl = auto.ControlFromHandle(hwnd)
-    except Exception as e:
-        print(f"[WECHAT-UIA] 无法获取主窗口控件: {e}")
-        return False
+    # 获取窗口位置和大小
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    win_w = r.right - r.left
+    win_h = r.bottom - r.top
 
-    candidates: list[auto.Control] = []
-    MAX_DEPTH = 18
+    # Qt 微信搜索结果第一条的大致中心位置：
+    #   X = 窗口水平居中
+    #   Y = 窗口顶部 + 标题栏 + 搜索框 + Tab 栏 + 第一项半高 ≈ +180px
+    cx = r.left + win_w // 2
+    cy = r.top + 180
 
-    def _walk(ctrl, depth=0):
-        if depth > MAX_DEPTH:
-            return
-        try:
-            name = ctrl.Name or ""
-            if keyword in name:
-                t = ctrl.ControlTypeName
-                # 优先 TextControl / ListItem / Button；忽略 Window/Pane 等顶层容器
-                if t in ("TextControl", "ListItemControl", "ButtonControl", "HyperlinkControl", "TreeItemControl"):
-                    candidates.append(ctrl)
-            for child in ctrl.GetChildren():
-                _walk(child, depth + 1)
-        except Exception:
-            pass
+    print(f"[WECHAT] 窗口 {win_w}x{win_h}, 第一条结果估计位置: ({cx}, {cy})")
 
-    print(f"[WECHAT-UIA] 开始搜索控件树（keyword={keyword}）...")
-    try:
-        _walk(main_ctrl)
-    except Exception as e:
-        print(f"[WECHAT-UIA] 遍历异常: {e}")
-        return False
-
-    if not candidates:
-        # 第二轮：放宽类型限制，任意控件名匹配即可
-        print(f"[WECHAT-UIA] 严格匹配未找到，尝试宽松匹配（不限控件类型）...")
-        def _walk_loose(ctrl, depth=0):
-            if depth > MAX_DEPTH:
-                return
-            try:
-                name = ctrl.Name or ""
-                if keyword in name:
-                    candidates.append(ctrl)
-                for child in ctrl.GetChildren():
-                    _walk_loose(child, depth + 1)
-            except Exception:
-                pass
-        try:
-            _walk_loose(main_ctrl)
-        except Exception:
-            pass
-
-    if not candidates:
-        print(f"[WECHAT-UIA] 未找到任何包含 '{keyword}' 的控件")
-        return False
-
-    # 按面积排序，优先点击较大的控件（通常是列表项容器而非小图标）
-    candidates.sort(
-        key=lambda c: c.BoundingRectangle.width() * c.BoundingRectangle.height(),
-        reverse=True,
-    )
-
-    target = candidates[0]
-    rect = target.BoundingRectangle
-    cx = rect.left + rect.width() // 2
-    cy = rect.top + rect.height() // 2
-    print(
-        f"[WECHAT-UIA] 点击目标: Name='{target.Name}' "
-        f"Type={target.ControlTypeName} Pos=({cx},{cy}) "
-        f"Size={rect.width()}x{rect.height()}"
-    )
+    # 点击结果区域
     pyautogui.moveTo(cx, cy, duration=0.15)
     pyautogui.click(cx, cy)
+    time.sleep(0.6)
+
+    # Enter 打开
+    pyautogui.press('enter')
     time.sleep(3.0)
     return True
 
 
-def _click_button_by_name(hwnd: int, button_text: str, fallback_tab_count: int = 4) -> bool:
-    """在当前窗口中查找并点击指定文本的按钮。
-
-    策略：
-      1. 先用 UIA 在整个窗口子树中搜索名称含 button_text 的 ButtonControl
-      2. 命中 → 点击其中心
-      3. 未命中 → fallback 键盘 Tab 导航 + Enter
-
-    返回 True 表示操作已执行。
+# 旧 UIA 文本搜索（Qt 下无效，保留仅供参考）
+def _click_search_result_by_name(hwnd: int, keyword: str) -> bool:
+    """[DEPRECATED — Qt 微信 UIA 看不到控件文字]
+    在搜索结果中用 UIAutomation 查找并点击名称匹配的条目。
     """
     import pyautogui
+    time.sleep(3.0)
+    return False  # Qt 下直接返回 False，让调用方走坐标/键盘兜底
 
-    try:
-        main_ctrl = auto.ControlFromHandle(hwnd)
-    except Exception as e:
-        print(f"[WECHAT-BUTTON-UIA] 无法获取控件: {e}")
-        # fallback
-        for _ in range(fallback_tab_count):
-            pyautogui.press('tab')
-            time.sleep(0.2)
-        pyautogui.press('enter')
-        time.sleep(2.5)
-        return True
 
-    candidates: list[auto.Control] = []
-    MAX_DEPTH = 18
-
-    def _walk(ctrl, depth=0):
-        if depth > MAX_DEPTH:
-            return
-        try:
-            name = ctrl.Name or ""
-            t = ctrl.ControlTypeName
-            if button_text in name and t in ("ButtonControl", "TextControl", "HyperlinkControl"):
-                candidates.append(ctrl)
-            for child in ctrl.GetChildren():
-                _walk(child, depth + 1)
-        except Exception:
-            pass
-
-    print(f"[WECHAT-BUTTON-UIA] 搜索按钮 '{button_text}'...")
-    try:
-        _walk(main_ctrl)
-    except Exception as e:
-        print(f"[WECHAT-BUTTON-UIA] 遍历异常: {e}")
-
-    if not candidates:
-        print(f"[WECHAT-BUTTON-UIA] 未找到按钮 '{button_text}'，fallback 键盘...")
-        for _ in range(fallback_tab_count):
-            pyautogui.press('tab')
-            time.sleep(0.2)
-        pyautogui.press('enter')
-        time.sleep(2.5)
-        return True
-
-    # 优先选面积最大的
-    candidates.sort(
-        key=lambda c: c.BoundingRectangle.width() * c.BoundingRectangle.height(),
-        reverse=True,
-    )
-    target = candidates[0]
-    rect = target.BoundingRectangle
-    cx = rect.left + rect.width() // 2
-    cy = rect.top + rect.height() // 2
-    print(f"[WECHAT-BUTTON-UIA] 点击按钮: '{target.Name}' at ({cx},{cy})")
-    pyautogui.moveTo(cx, cy, duration=0.1)
-    pyautogui.click(cx, cy)
+def _click_follow_button(hwnd: int) -> None:
+    """在服务号详情页中用 Tab 导航到「关注」按钮并 Enter。
+    Qt 微信 UIA 看不到按钮文字，只能用键盘盲操。
+    Tab 次数：搜索框 → 结果列表项 × N → 按钮、头像等各种控件，约需 10-14 次。
+    """
+    import pyautogui
+    time.sleep(1.5)
+    for i in range(14):
+        pyautogui.press('tab')
+        time.sleep(0.2)
+    pyautogui.press('enter')
     time.sleep(2.5)
-    return True
+
+
+def _click_send_msg_button(hwnd: int) -> None:
+    """在详情页中导航到「发消息」按钮并 Enter。
+    关注成功后详情页刷新，「发消息」通常在按钮组靠前位置（4-8 个 Tab）。
+    """
+    import pyautogui
+    time.sleep(1.0)
+    for i in range(8):
+        pyautogui.press('tab')
+        time.sleep(0.2)
+    pyautogui.press('enter')
+    time.sleep(2.0)
 
 
 def _goto_message_input(hwnd: int) -> None:
@@ -802,31 +723,27 @@ async def wechat_search_and_follow(
         _search_keyword(hwnd, keyword)
         print(f"[WECHAT-STEP1] 搜索已提交")
 
-        # ── Step 2: 在搜索结果窗口中找到并点击目标 ──
-        print(f"[WECHAT-STEP2] 在搜索结果中定位 '{keyword}'...")
-        hit = _click_search_result_by_name(hwnd, keyword)
+        # ── Step 2: 在搜索结果窗口中找到并点击第一条结果 ──
+        print(f"[WECHAT-STEP2] 等待搜索结果窗口渲染...")
+        # Qt 微信 UIA 无法读到控件文字，用屏幕坐标点击 + 键盘兜底
+        hit = _click_first_search_result(hwnd)
         if not hit:
-            # Fallback: 键盘导航兜底
-            print("[WECHAT-STEP2] UIA 未命中，fallback 到键盘导航...")
+            print("[WECHAT-STEP2] 坐标点击未命中，fallback 键盘...")
             _navigate_to_first_result(hwnd)
-        print("[WECHAT-STEP2] 已点击搜索结果")
+        print("[WECHAT-STEP2] 已打开搜索结果")
 
-        # ── Step 3: 关注（在详情页中点击关注按钮）──
-        print("[WECHAT-STEP3] 等待详情页加载并尝试关注...")
-        time.sleep(2.0)
-        # 尝试 UIA 找到并点击「关注」按钮
-        _click_button_by_name(hwnd, "关注", fallback_tab_count=6)
+        # ── Step 3: 关注（Tab 到关注按钮）──
+        print("[WECHAT-STEP3] Tab 导航到关注按钮...")
+        _click_follow_button(hwnd)
         print("[WECHAT-STEP3] 关注操作已执行")
 
         result = f"搜索「{keyword}」并尝试关注完成"
 
-        # ── Step 4: 发私信（如有 message 且关注成功/已关注则可进入聊天页）──
+        # ── Step 4: 发私信 ──
         if message:
-            print(f"[WECHAT-STEP4] 查找「发消息」入口: {message[:30]}...")
-            # 关注成功后详情页会出现「发消息」按钮，点击进入聊天
-            time.sleep(1.5)
-            _click_button_by_name(hwnd, "发消息", fallback_tab_count=4)
-            time.sleep(2.0)
+            print(f"[WECHAT-STEP4] Tab 导航到发消息按钮: {message[:30]}...")
+            _click_send_msg_button(hwnd)
+            time.sleep(1.0)
 
             _goto_message_input(hwnd)
             _send_message(hwnd, message)
