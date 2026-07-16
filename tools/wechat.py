@@ -594,14 +594,12 @@ def _navigate_to_first_result(hwnd: int) -> None:
 
 
 def _click_first_search_result(hwnd: int) -> bool:
-    """在 Qt 微信搜索结果窗口中直接点击第一条结果。
+    """在 Qt 微信搜索结果窗口中点击第一条结果，然后切换到新弹出的详情窗口。
 
     Qt 微信 UIA 看不到控件文字，必须用屏幕坐标。
-    利用搜索结果布局的固定性：第一条结果在搜索框+Tab栏下方约 170px 处。
-    先鼠标点击结果区域确保焦点，再 Enter 打开。
+    点击后会弹出一个新窗口（如「服务号」窗口），需要检测并返回新窗口的 hwnd。
     """
     import pyautogui
-    # 等搜索结果窗口完全渲染
     time.sleep(3.0)
 
     # 获取窗口位置和大小
@@ -610,23 +608,117 @@ def _click_first_search_result(hwnd: int) -> bool:
     win_w = r.right - r.left
     win_h = r.bottom - r.top
 
-    # Qt 微信搜索结果第一条的大致中心位置：
-    #   X = 窗口水平居中
-    #   Y = 窗口顶部 + 标题栏 + 搜索框 + Tab 栏 + 第一项半高 ≈ +180px
+    # 第一条结果的大致中心位置
     cx = r.left + win_w // 2
     cy = r.top + 180
 
     print(f"[WECHAT] 窗口 {win_w}x{win_h}, 第一条结果估计位置: ({cx}, {cy})")
 
-    # 点击结果区域
     pyautogui.moveTo(cx, cy, duration=0.15)
     pyautogui.click(cx, cy)
     time.sleep(0.6)
-
-    # Enter 打开
     pyautogui.press('enter')
     time.sleep(3.0)
     return True
+
+
+def _find_new_window_by_title(
+    keyword: str,
+    exclude_hwnd: int = 0,
+    min_w: int = 400,
+    min_h: int = 400,
+    timeout: int = 10,
+) -> int | None:
+    """搜索标题含 keyword 的可见窗口，返回 hwnd。
+    排除 exclude_hwnd（通常是旧窗口）。
+    """
+    import subprocess
+    start = time.time()
+    while time.time() - start < timeout:
+        # 枚举所有可见窗口
+        found = []
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        @WNDENUMPROC
+        def _enum(hwnd, _lp):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            if hwnd == exclude_hwnd:
+                return True
+            r = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(r))
+            ww = r.right - r.left
+            hh = r.bottom - r.top
+            if ww < min_w or hh < min_h:
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(max(256, length + 1))
+            user32.GetWindowTextW(hwnd, buf, 256)
+            title = buf.value
+            if keyword in title:
+                found.append(hwnd)
+            return True
+
+        user32.EnumWindows(_enum, 0)
+        if found:
+            return found[0]
+        time.sleep(0.5)
+    return None
+
+
+def _click_follow_in_detail_window(hwnd: int) -> None:
+    """在「服务号」详情窗口中点击绿色「关注」按钮。
+
+    从用户反馈精确调整：
+      - y 轴坐标正确（按钮在简介文字下方）
+      - x 轴需要再向右偏移 20px
+      - 按钮约在窗口左侧 + 200px 处
+    """
+    import pyautogui
+    time.sleep(2.0)
+
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    win_w = r.right - r.left
+    win_h = r.bottom - r.top
+
+    # 按钮位置：x=200（再向右20px），y=350
+    cx = r.left + 200
+    cy = r.top + 350
+
+    print(f"[WECHAT] 详情窗口 {win_w}x{win_h} at ({r.left},{r.top}), 关注按钮估计位置: ({cx}, {cy})")
+
+    pyautogui.moveTo(cx, cy, duration=0.15)
+    pyautogui.click(cx, cy)
+    time.sleep(2.5)
+
+
+def _click_send_msg_in_detail_window(hwnd: int) -> None:
+    """关注成功后，在详情窗口中点击「私信」按钮。
+
+    从截图看，关注后界面显示：
+      - 左侧：「已关注」按钮（灰色）
+      - 右侧：「私信」按钮（绿色）
+      - 私信按钮在关注按钮右边，约在窗口左侧 + 280px 处
+      - y 坐标与关注按钮相同（约 350）
+    """
+    import pyautogui
+    time.sleep(1.5)
+
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    win_w = r.right - r.left
+    win_h = r.bottom - r.top
+
+    # 私信按钮在关注按钮右边，x 偏移约 +150px
+    cx = r.left + 350
+    cy = r.top + 350
+
+    print(f"[WECHAT] 详情窗口 {win_w}x{win_h} at ({r.left},{r.top}), 私信按钮估计位置: ({cx}, {cy})")
+
+    pyautogui.moveTo(cx, cy, duration=0.15)
+    pyautogui.click(cx, cy)
+    time.sleep(2.5)
 
 
 # 旧 UIA 文本搜索（Qt 下无效，保留仅供参考）
@@ -723,30 +815,60 @@ async def wechat_search_and_follow(
         _search_keyword(hwnd, keyword)
         print(f"[WECHAT-STEP1] 搜索已提交")
 
-        # ── Step 2: 在搜索结果窗口中找到并点击第一条结果 ──
+        # ── Step 2: 在搜索结果窗口中点击第一条结果 ──
         print(f"[WECHAT-STEP2] 等待搜索结果窗口渲染...")
-        # Qt 微信 UIA 无法读到控件文字，用屏幕坐标点击 + 键盘兜底
-        hit = _click_first_search_result(hwnd)
-        if not hit:
-            print("[WECHAT-STEP2] 坐标点击未命中，fallback 键盘...")
-            _navigate_to_first_result(hwnd)
-        print("[WECHAT-STEP2] 已打开搜索结果")
+        _click_first_search_result(hwnd)
+        print("[WECHAT-STEP2] 已点击第一条结果，等待新窗口弹出...")
 
-        # ── Step 3: 关注（Tab 到关注按钮）──
-        print("[WECHAT-STEP3] Tab 导航到关注按钮...")
-        _click_follow_button(hwnd)
+        # 检测新弹出的「服务号」详情窗口
+        detail_hwnd = _find_new_window_by_title(
+            keyword="服务号",
+            exclude_hwnd=hwnd,
+            min_w=500,
+            min_h=500,
+            timeout=10,
+        )
+        if detail_hwnd is None:
+            print("[WECHAT-STEP2] 未检测到新窗口，fallback 键盘导航...")
+            _navigate_to_first_result(hwnd)
+            detail_hwnd = hwnd  # 继续用原窗口
+        else:
+            print(f"[WECHAT-STEP2] 检测到详情窗口: hwnd={detail_hwnd}")
+            # 切换到新窗口前台
+            _ensure_foreground(detail_hwnd)
+            time.sleep(0.5)
+
+        # ── Step 3: 在详情窗口中点击「关注」按钮 ──
+        print("[WECHAT-STEP3] 在详情窗口中点击关注按钮...")
+        _click_follow_in_detail_window(detail_hwnd)
         print("[WECHAT-STEP3] 关注操作已执行")
 
         result = f"搜索「{keyword}」并尝试关注完成"
 
-        # ── Step 4: 发私信 ──
+        # ── Step 4: 在详情窗口中点击「发消息」进入聊天 ──
         if message:
-            print(f"[WECHAT-STEP4] Tab 导航到发消息按钮: {message[:30]}...")
-            _click_send_msg_button(hwnd)
-            time.sleep(1.0)
+            print(f"[WECHAT-STEP4] 点击发消息按钮: {message[:30]}...")
+            _click_send_msg_in_detail_window(detail_hwnd)
+            time.sleep(1.5)
 
-            _goto_message_input(hwnd)
-            _send_message(hwnd, message)
+            # 发消息按钮点击后，聊天窗口可能在原窗口或新窗口
+            # 先尝试在新窗口中找输入框
+            chat_hwnd = _find_new_window_by_title(
+                keyword="火眼审阅",
+                exclude_hwnd=hwnd,
+                min_w=400,
+                min_h=400,
+                timeout=5,
+            )
+            if chat_hwnd is None:
+                chat_hwnd = detail_hwnd
+            else:
+                print(f"[WECHAT-STEP4] 检测到聊天窗口: hwnd={chat_hwnd}")
+                _ensure_foreground(chat_hwnd)
+                time.sleep(0.5)
+
+            _goto_message_input(chat_hwnd)
+            _send_message(chat_hwnd, message)
             print("[WECHAT-STEP4] 消息已发送")
             result += "，已发送私信"
 
