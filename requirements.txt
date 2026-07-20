@@ -3,5 +3,7 @@ langchain-openai
 langchain-community
 playwright
 json_repair
-uiautomation
 pywin32
+opencv-python
+pillow
+numpy

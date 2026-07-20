@@ -152,12 +152,37 @@ def find_green_button(
     window_img: np.ndarray,
     min_area: int = 200,
     max_area: int = 20000,
+    y_min: int = 0,
+    y_max: int = 0,
 ) -> tuple[int, int] | None:
     """在窗口图像中查找绿色按钮的中心点。
 
     适用于微信详情页中的「关注」「发消息」等绿色按钮。
     返回相对于窗口客户区的 (x, y)，未找到返回 None。
+
+    Args:
+        y_min, y_max: 垂直搜索范围（像素，相对于客户区）。为 0 时不限制。
     """
+    candidates = _find_green_candidates(window_img, min_area, max_area, y_min, y_max)
+    if not candidates:
+        return None
+    # 优先选择面积最大的绿色按钮
+    candidates.sort(key=lambda c: c[2], reverse=True)
+    return candidates[0][0], candidates[0][1]
+
+
+def _find_green_candidates(
+    window_img: np.ndarray,
+    min_area: int = 200,
+    max_area: int = 20000,
+    y_min: int = 0,
+    y_max: int = 0,
+) -> list[tuple[int, int, int, int, int]]:
+    """返回所有绿色候选区域，每项 (cx, cy, area, w, h)。内部使用。"""
+    img_h, _ = window_img.shape[:2]
+    if y_max <= 0:
+        y_max = img_h
+
     hsv = cv2.cvtColor(window_img, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, _WECHAT_GREEN_HSV_LOW, _WECHAT_GREEN_HSV_HIGH)
 
@@ -172,17 +197,67 @@ def find_green_button(
         if not (min_area <= area <= max_area):
             continue
         x, y, w, h = cv2.boundingRect(cnt)
+        # 垂直范围约束
+        if y < y_min or y + h > y_max:
+            continue
         aspect = w / max(h, 1)
         # 按钮宽高比通常在 1.5~5 之间（微信绿色按钮比较扁）
         if 1.0 <= aspect <= 6.0:
             candidates.append((x + w // 2, y + h // 2, area, w, h))
 
+    return candidates
+
+
+def find_button_with_text(
+    window_img: np.ndarray,
+    target_text: str,
+    min_area: int = 200,
+    max_area: int = 20000,
+    y_min: int = 0,
+    y_max: int = 0,
+    padding: int = 8,
+) -> tuple[int, int] | None:
+    """颜色粗筛 + OCR 文字确认，精确定位包含指定文字的绿色按钮。
+
+    流程：
+      1. 在所有绿色候选区域中按面积排序
+      2. 对每个候选区域扩大 padding 后做 OCR
+      3. 返回包含 target_text 的第一个匹配按钮中心点
+
+    Args:
+        target_text: 按钮文字，如「关注」「发消息」「私信」
+        padding: 候选区域外扩像素，避免 OCR 截断按钮文字
+
+    Returns:
+        相对于窗口客户区的 (cx, cy)，未找到返回 None
+    """
+    candidates = _find_green_candidates(window_img, min_area, max_area, y_min, y_max)
     if not candidates:
         return None
 
-    # 优先选择面积最大的绿色按钮
+    # 按面积从大到小排序
     candidates.sort(key=lambda c: c[2], reverse=True)
-    return candidates[0][0], candidates[0][1]
+
+    img_h, img_w = window_img.shape[:2]
+
+    for cx, cy, area, bw, bh in candidates:
+        # 裁剪按钮区域（外扩 padding）
+        rx = max(0, cx - bw // 2 - padding)
+        ry = max(0, cy - bh // 2 - padding)
+        rw = min(bw + padding * 2, img_w - rx)
+        rh = min(bh + padding * 2, img_h - ry)
+        roi = window_img[ry:ry + rh, rx:rx + rw]
+
+        if roi.size == 0:
+            continue
+
+        ocr_result = _ocr_image(roi)
+        for recognized, _bbox, conf in ocr_result:
+            if target_text in recognized:
+                print(f"[VISION-TEXT] 绿色区域匹配「{recognized}」(target={target_text}, conf={conf:.2f})")
+                return (cx, cy)
+
+    return None
 
 
 # ═══════════════════════════════════════════════

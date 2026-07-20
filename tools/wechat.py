@@ -21,6 +21,7 @@ from .wechat_vision import (
     capture_window,
     find_template_center,
     find_green_button,
+    find_button_with_text,
     find_text_center,
     save_template_from_window,
     visualize_detection,
@@ -559,10 +560,13 @@ def _safe_ensure_foreground(hwnd: int) -> bool:
 
 
 def _click_at(hwnd: int, client_x: int, client_y: int, duration: float = 0.15) -> None:
-    """在窗口客户区指定坐标处点击（视觉定位结果用）。"""
+    """在窗口客户区指定坐标处点击（视觉定位结果用）。
+
+    不调 SetForegroundWindow——调用方应保证窗口已在前台。
+    重复切前台在 Qt 微信中会关闭搜索覆盖层。
+    """
     import pyautogui
     sx, sy = _window_client_to_screen(hwnd, client_x, client_y)
-    _safe_ensure_foreground(hwnd)
     pyautogui.moveTo(sx, sy, duration=duration)
     pyautogui.click(sx, sy)
     time.sleep(0.2)
@@ -638,17 +642,20 @@ def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
     视觉优先：
       1. 先截图 + OCR 检测关键词位置（如「火眼审阅」）
       2. 未找到则按固定第一条结果区域点击
+
+    注意：搜索覆盖层内嵌在主窗口上，禁止 re-foreground（会导致覆盖层关闭）。
     """
     import pyautogui
     time.sleep(3.0)
 
-    if not _safe_ensure_foreground(hwnd):
-        print("[WECHAT] 搜索结果窗口无法前台， fallback 使用固定坐标")
+    # ⚠ 绝不调 _ensure_foreground / SetForegroundWindow：
+    #    Qt 微信的搜索结果是主窗口内的覆盖层，切前台会关掉覆盖层回到主界面
 
     # 获取窗口客户区
     img = capture_window(hwnd, client_only=True)
     if img is None or img.size == 0:
-        return False
+        print("[WECHAT] 截图失败，fallback 屏幕坐标")
+        return _click_first_search_result_legacy(hwnd)
 
     target_point = None
 
@@ -661,16 +668,17 @@ def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
         except Exception as e:
             print(f"[WECHAT] OCR 失败，将使用固定位置: {e}")
 
-    # 2. 未命中则使用固定区域（第一条结果大约在客户区中上部）
+    # 2. 未命中则使用固定区域
     if target_point is None:
         h, w = img.shape[:2]
-        target_point = (w // 2, int(h * 0.25))
+        # 微信搜索第一条结果位于客户区上方约 150px 处，x 居中
+        target_point = (w // 2, 150)
         print(f"[WECHAT] 使用固定第一条结果位置: {target_point}")
 
     # 调试截图
     visualize_detection(img, target_point, save_path=Path("debug_search_result.png"))
 
-    # 点击目标位置
+    # 点击目标位置（客户区坐标→屏幕坐标）
     _click_at(hwnd, target_point[0], target_point[1])
     time.sleep(0.6)
     pyautogui.press('enter')
@@ -773,7 +781,20 @@ def _click_follow_in_detail_window(hwnd: int) -> None:
 
     pyautogui.moveTo(sx, sy, duration=0.15)
     pyautogui.click(sx, sy)
-    time.sleep(2.5)
+    time.sleep(2.0)
+
+    # 验证关注是否成功
+    verified = _verify_follow_state(hwnd)
+    if not verified:
+        # 再试一次：稍微调整 y 坐标
+        print("[WECHAT] 关注验证失败，微调坐标重试...")
+        sy2 = sy + 20
+        pyautogui.moveTo(sx, sy2, duration=0.1)
+        pyautogui.click(sx, sy2)
+        time.sleep(2.0)
+        verified = _verify_follow_state(hwnd)
+        if not verified:
+            print("[WECHAT] 关注重试仍有问题，继续流程（可能已关注）")
 
 
 def _click_send_msg_in_detail_window(hwnd: int) -> None:
@@ -810,10 +831,10 @@ def _click_send_msg_in_detail_window(hwnd: int) -> None:
 def _find_button_by_vision(hwnd: int, template_name: str, prefer_right: bool = False) -> tuple[int, int] | None:
     """视觉查找按钮，返回客户区坐标。
 
-    策略：
-      1. 模板匹配（如果模板存在）
-      2. 检测窗口中的绿色按钮
-      3. 如果 prefer_right=True，在多个绿色按钮中选偏右的；否则选偏左的
+    策略（按优先级）：
+      1. 模板匹配（如果模板文件存在）
+      2. 颜色 + OCR 双验证：绿色区域必须包含指定文字
+      3. 纯颜色检测兜底（限制窗口上半部分，排除推文区绿色元素）
     """
     try:
         img = capture_window(hwnd, client_only=True)
@@ -824,6 +845,7 @@ def _find_button_by_vision(hwnd: int, template_name: str, prefer_right: bool = F
     if img is None or img.size == 0:
         return None
 
+    # 策略 1：模板匹配
     template_path = DEFAULT_TEMPLATE_DIR / template_name
     if template_path.exists():
         center = find_template_center(img, template_path, confidence=0.75)
@@ -832,14 +854,57 @@ def _find_button_by_vision(hwnd: int, template_name: str, prefer_right: bool = F
             visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_{template_name}")
             return center
 
-    # 颜色检测：找绿色按钮
-    center = find_green_button(img)
+
+    img_h, img_w = img.shape[:2]
+    y_limit = int(img_h * 0.45)
+
+    # 策略 2：颜色 + OCR 双验证（绿色区域 + 文字确认）
+    target_text = "关注" if "follow" in template_name else "私信"
+    center = find_button_with_text(img, target_text=target_text, y_min=0, y_max=y_limit)
+    if center:
+        print(f"[WECHAT-VISION] 颜色+OCR 定位「{target_text}」按钮: {center}")
+        visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_text_{template_name}")
+        return center
+
+    # 策略 3：纯颜色检测（文字 OCR 失败时兜底）
+    center = find_green_button(img, y_min=0, y_max=y_limit)
     if center:
         print(f"[WECHAT-VISION] 颜色检测定位绿色按钮: {center}")
         visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_color_{template_name}")
         return center
 
+    # 策略 4：放宽 y 限制再试
+    center = find_green_button(img, y_min=0, y_max=int(img_h * 0.55))
+    if center:
+        print(f"[WECHAT-VISION] 放宽范围后定位绿色按钮: {center}")
+        visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_color2_{template_name}")
+        return center
+
     return None
+
+
+def _verify_follow_state(hwnd: int) -> bool:
+    """验证关注是否成功：截图检测按钮文字是否从「关注」变为「已关注」或「发消息」。
+
+    调用时机：_click_follow_in_detail_window 点击后等待渲染完成。
+    返回 True 表示关注成功。
+    """
+    time.sleep(1.0)
+    try:
+        img = capture_window(hwnd, client_only=True)
+        img_h, img_w = img.shape[:2]
+        # 在按钮区域（上半部分）做 OCR，找「已关注」「发消息」
+        roi = img[:int(img_h * 0.5), :]
+        for text in ("已关注", "发消息", "私信"):
+            center = find_text_center(roi, text, confidence=0.5)
+            if center:
+                print(f"[WECHAT-VERIFY] 检测到「{text}」，关注已完成")
+                return True
+        print("[WECHAT-VERIFY] 未检测到已关注状态，按钮可能未命中")
+        return False
+    except Exception as e:
+        print(f"[WECHAT-VERIFY] 状态验证异常: {e}")
+        return False
 
 
 # 旧 UIA 文本搜索（Qt 下无效，保留仅供参考）
