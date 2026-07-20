@@ -61,7 +61,7 @@ python main.py "帮我写篇AI文章排版导出PDF放桌面"
 python main.py "用WPS写一篇《2026年AI Agent发展趋势》的文章，排版：标题黑体小二加粗居中，小节标题黑体小三加粗，正文宋体小四首行缩进两字符行距28磅，要点数字序号列出，保存word导出PDF放桌面"
 
 # 微信（自动识别）
-python main.py "帮我搜索微信服务号火眼审阅并关注发私信"
+python main.py "帮我搜索微信服务号火眼审阅并关注发私信:这是一条测试信息"
 ```
 
 ---
@@ -167,6 +167,9 @@ Zhihu-Agent-Playbook/
 │   ├── wps_playbook.py        # WPS 模板缓存：排版参数+内容骨架复用
 │   ├── wechat.py              # 微信自动化：搜索/关注/发私信
 │   ├── wechat_vision.py       # 微信视觉辅助：截图/模板匹配/颜色检测/OCR
+│   ├── wechat_verify.py       # 微信流程验证器：每步截图+OCR 断点验证
+│   ├── wechat_ocr.py          # 微信聊天气泡文字预处理（CLAHE+二值化）
+│   ├── wechat_playbook.py     # 微信 Playbook：百分比坐标缓存 30 天自动失效
 │   ├── save_wechat_template.py # 微信按钮模板保存工具
 │   ├── playbook.py            # 知乎 DOM 选择器查询/缓存执行
 │   ├── image_gen.py           # SVG 配图生成 + 编辑器插入
@@ -175,11 +178,10 @@ Zhihu-Agent-Playbook/
 ├── assets/
 │   └── wechat_templates/      # 微信按钮模板（关注/私信）
 ├── memory/
-│   ├── zhihu_playbook.json    # DOM 选择器缓存
+│   ├── zhihu_playbook.json    # 知乎 DOM 选择器缓存
+│   ├── wechat_playbook.json   # 微信搜索结果+按钮坐标缓存
 │   └── wps_templates.json     # WPS 模板缓存
-└── .qclaw/
-    └── workspace/
-        └── wechat-*-fix-*.md  # 微信链路修复记录
+└── debug_screenshots/         # 验证失败自动截图（调试用，定期清理）
 ```
 
 ---
