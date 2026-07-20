@@ -476,27 +476,261 @@ def _get_wechat_hwnd() -> int | None:
         print("[WECHAT] 登录面板未出现")
         return None
 
-    # 点绿色"登录"按钮（位于面板底部 ~y=355）
-    x, y, x2, y2 = login_rect
-    w = x2 - x
-    login_btn_x = x + w // 2
-    login_btn_y = y + 358  # 面板 388px 中按钮在 y~340-375
-    print(f"[WECHAT] 点击登录按钮 ({login_btn_x}, {login_btn_y})...")
-
+    # ═══ 分析登录面板状态（截图 + OCR）───
     user32.SetForegroundWindow(login_hwnd)
-    time.sleep(0.3)
-    user32.SetCursorPos(login_btn_x, login_btn_y)
-    time.sleep(0.1)
-    import pyautogui
-    pyautogui.click(login_btn_x, login_btn_y)
-    time.sleep(2)
+    time.sleep(0.5)
+    img = capture_window(login_hwnd, client_only=True)
+    login_mode = _detect_login_mode(img, login_rect)
+    print(f"[WECHAT] 登录模式: {login_mode}")
 
-    # 等主窗口出现（>800x600）
-    print("[WECHAT] 等待主聊天窗口...")
-    for i in range(30):
-        time.sleep(1)
-        large_windows = []
-        pid = None
+    if login_mode == "confirm_dialog":
+        # 已经弹出「请在手机微信点击确认登录」——等待用户确认
+        print("[WECHAT] 检测到手机确认对话框，等待用户在手机上确认...")
+        return await_login_main_window(pyautogui, subprocess, "手机确认登录", timeout=60)
+
+    elif login_mode == "login_button":
+        # 有绿色登录按钮 → 点击
+        _click_login_button(img, login_rect, login_hwnd)
+        time.sleep(2)
+
+        # 点击后可能：直接进入主窗口 / 弹出确认对话框
+        hwnd_main = await_login_main_window(pyautogui, subprocess, "登录后进入主界面", timeout=25)
+        if hwnd_main:
+            return hwnd_main
+
+        # 检测是否弹出手机确认对话框
+        confirm = detect_confirm_dialog(pyautogui, subprocess, timeout=5)
+        if confirm == "confirm_dialog":
+            print("[WECHAT] 登录按钮已点击，等待用户在手机上确认...")
+            return await_login_main_window(pyautogui, subprocess, "手机确认登录", timeout=60)
+
+        print("[WECHAT] 登录按钮点击后未检测到主窗口或确认对话框")
+        return None
+
+    elif login_mode == "qr_code":
+        # 二维码 → 提示用户扫码，然后按 Enter 继续
+        #     Enter 后循环重检测（像程序重新启动一样）
+        while True:
+            print("[WECHAT] ╔══════════════════════════════════╗")
+            print("[WECHAT] ║  请用手机微信扫描二维码登录        ║")
+            print("[WECHAT] ║  扫码完成后按 Enter 继续...        ║")
+            print("[WECHAT] ╚══════════════════════════════════╝")
+            # 等待期间隔 5 秒检查是否已经登录成功（用户可能提前扫码 + 手机确认）
+            while True:
+                import msvcrt
+                # 检测主窗口是否已经出现
+                hwnd_check = _find_wechat_hwnd()
+                if hwnd_check:
+                    print(f"[WECHAT] 检测到已登录！主窗口: hwnd={hwnd_check}")
+                    _ensure_foreground(hwnd_check)
+                    _CACHED_HWND = hwnd_check
+                    return hwnd_check
+                # 等待 1 秒或用户按 Enter
+                for _ in range(10):  # 10 × 0.5s = 5s
+                    if msvcrt.kbhit():
+                        msvcrt.getch()  # 吃掉这个字符
+                        break
+                    time.sleep(0.5)
+                else:
+                    continue  # 5s 内无输入，继续检测
+                break  # 用户按了 Enter
+
+            # 用户按了 Enter  → 像程序重新启动一样检测
+            print("[WECHAT] 重新检测微信状态...")
+
+            # 先试热键恢复
+            pyautogui.keyDown('ctrl')
+            pyautogui.keyDown('alt')
+            pyautogui.keyDown('w')
+            pyautogui.keyUp('w')
+            pyautogui.keyUp('alt')
+            pyautogui.keyUp('ctrl')
+            time.sleep(2.0)
+
+            # 用 _find_wechat_hwnd 检测（已有进程 → 主窗口）
+            hwnd_main = _find_wechat_hwnd()
+            if hwnd_main:
+                _ensure_foreground(hwnd_main)
+                _CACHED_HWND = hwnd_main
+                print(f"[WECHAT] 登录成功，主窗口就绪: hwnd={hwnd_main}")
+                return hwnd_main
+
+            # 主窗口没出现 → 重新截图检测登录面板状态
+            print("[WECHAT] 主窗口未找到，重新检测登录面板...")
+            current_hwnd = None
+            current_rect = None
+            # 枚举当前 WeChat PID 的可见窗口
+            for i2 in range(10):
+                time.sleep(0.5)
+                pid = None
+                for name in ("WeChat.exe", "Weixin.exe"):
+                    try:
+                        out = subprocess.check_output(
+                            f'tasklist /FI "IMAGENAME eq {name}" /FO CSV /NH',
+                            shell=True, text=True
+                        )
+                        for line in out.strip().split('\n'):
+                            if name in line:
+                                pid = int(line.replace('"', '').split(',')[1].strip())
+                                break
+                    except Exception:
+                        pass
+                    if pid:
+                        break
+                if not pid:
+                    continue
+                result = {}
+                WNDENUMPROC3 = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+                @WNDENUMPROC3
+                def _enum3(hwnd, _lp):
+                    wp = wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+                    if wp.value != pid:
+                        return True
+                    if not user32.IsWindowVisible(hwnd):
+                        return True
+                    r = wintypes.RECT()
+                    user32.GetWindowRect(hwnd, ctypes.byref(r))
+                    ww, hh = r.right - r.left, r.bottom - r.top
+                    if ww < 100 or hh < 100:
+                        return True
+                    cls_buf = ctypes.create_unicode_buffer(256)
+                    user32.GetClassNameW(hwnd, cls_buf, 256)
+                    if "TrayIcon" in cls_buf.value:
+                        return True
+                    result['hwnd'] = hwnd
+                    result['rect'] = (r.left, r.top, r.right, r.bottom)
+                    result['title'] = cls_buf.value
+                    return False
+                user32.EnumWindows(_enum3, 0)
+                if result:
+                    current_hwnd = result['hwnd']
+                    current_rect = result['rect']
+                    break
+
+            if current_hwnd is None:
+                print("[WECHAT] 微信窗口未找到，可能已关闭，退出登录循环")
+                return None
+
+            # 重新截图 + OCR 检测
+            user32.SetForegroundWindow(current_hwnd)
+            time.sleep(0.5)
+            img = capture_window(current_hwnd, client_only=True)
+            login_mode = _detect_login_mode(img, current_rect)
+            print(f"[WECHAT] 重新检测登录模式: {login_mode}")
+
+            if login_mode == "login_button":
+                _click_login_button(img, current_rect, current_hwnd)
+                time.sleep(2)
+                hwnd_main = await_login_main_window(pyautogui, subprocess, "登录后进入主界面", timeout=25)
+                if hwnd_main:
+                    return hwnd_main
+                # 继续循环（可能回到二维码）
+            elif login_mode == "confirm_dialog":
+                print("[WECHAT] 检测到手机确认对话框，等待用户在手机上确认...")
+                hwnd_main = await_login_main_window(pyautogui, subprocess, "手机确认登录", timeout=60)
+                if hwnd_main:
+                    return hwnd_main
+                # 继续循环
+            # login_mode == "qr_code" → 继续循环显示二维码提示
+
+    else:
+        print(f"[WECHAT] 未知登录模式，尝试通用处理...")
+        return await_login_main_window(pyautogui, subprocess, "通用等待登录", timeout=60)
+
+
+# ═══════════════════════════════════════════════
+# 登录辅助函数
+# ═══════════════════════════════════════════════
+
+def _detect_login_mode(img, login_rect: tuple) -> str:
+    """通过 OCR 分析登录面板截图，判断当前处于哪种登录模式。
+
+    注意：二维码页面也有一个底部绿色「登录」按钮（切换账号用），
+    所以必须**先**检测二维码特征，再查绿色按钮。
+
+    Returns:
+        "login_button"  — 有绿色「登录」按钮且无二维码特征（一键登录）
+        "confirm_dialog" — 已弹出「请在手机微信点击确认登录」对话框
+        "qr_code"       — 显示二维码，等待手机扫码
+    """
+    if img is None or img.size == 0:
+        return "qr_code"
+
+    img_h, img_w = img.shape[:2]
+
+    # ═══ 第一步：检测确认对话框特征（优先级最高）───
+    confirm_texts = ["请在手机", "点击确认登录"]
+    for text in confirm_texts:
+        center = find_text_center(img, text, confidence=0.35)
+        if center:
+            print(f"[WECHAT-LOGIN] OCR: 「{text}」→ confirm_dialog")
+            return "confirm_dialog"
+
+    # ═══ 第二步：检测二维码特征（优先于绿色按钮！）───
+    # 二维码页面通常有「扫码登录」「二维码」「请使用手机微信」等
+    qr_texts = ["扫码登录", "二维码", "请使用手机微信", "手机微信"]
+    for text in qr_texts:
+        center = find_text_center(img, text, confidence=0.35)
+        if center:
+            print(f"[WECHAT-LOGIN] OCR: 「{text}」→ qr_code")
+            return "qr_code"
+
+    # ═══ 第三步：无二维码特征 + 有绿色「登录」按钮 → 一键登录 ───
+    green = find_green_button(img, min_area=300, max_area=20000,
+                               y_min=int(img_h * 0.4), y_max=img_h)
+    if green:
+        cx, cy = green
+        roi = img[max(0, cy - 30):min(img_h, cy + 30), max(0, cx - 80):min(img_w, cx + 80)]
+        for text in ("登录", "Enter"):
+            c = find_text_center(roi, text, confidence=0.40)
+            if c:
+                print(f"[WECHAT-LOGIN] 绿色登录按钮「{text}」且无二维码特征 → login_button")
+                return "login_button"
+        print(f"[WECHAT-LOGIN] 绿色区域无二维码文字 → login_button")
+        return "login_button"
+
+    # ═══ 第四步：兜底 ───
+    print(f"[WECHAT-LOGIN] 未检测到明确特征，默认 qr_code")
+    return "qr_code"
+
+
+def _click_login_button(img, login_rect: tuple, login_hwnd: int) -> None:
+    """在登录面板中找到并点击绿色登录按钮。"""
+    import pyautogui
+    x, y, x2, y2 = login_rect
+    img_h = img.shape[0] if img is not None else (y2 - y)
+
+    # 先用颜色检测找绿色按钮中心
+    if img is not None:
+        green = find_green_button(img, min_area=300, max_area=20000,
+                                   y_min=int(img_h * 0.4), y_max=img_h)
+        if green:
+            sx, sy = _window_client_to_screen(login_hwnd, green[0], green[1])
+            print(f"[WECHAT-LOGIN] 点击绿色登录按钮: ({sx}, {sy})")
+            pyautogui.moveTo(sx, sy, duration=0.15)
+            pyautogui.click(sx, sy)
+            return
+
+    # 兜底：固定坐标（面板宽度中心，下半部分）
+    panel_w = x2 - x
+    btn_x = x + panel_w // 2
+    btn_y = y + int((y2 - y) * 0.85)  # 面板高度 85% 处
+    print(f"[WECHAT-LOGIN] 固定坐标点击登录按钮: ({btn_x}, {btn_y})")
+    pyautogui.moveTo(btn_x, btn_y, duration=0.15)
+    pyautogui.click(btn_x, btn_y)
+
+
+def detect_confirm_dialog(pyautogui, subprocess, timeout: int = 5) -> str | None:
+    """检测当前屏幕是否有手机确认对话框弹出。
+
+    Returns:
+        "confirm_dialog" 或 "main_window" 或 None
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        # 搜索所有可见微信窗口
+        pids = []
         for name in ("WeChat.exe", "Weixin.exe"):
             try:
                 out = subprocess.check_output(
@@ -508,55 +742,166 @@ def _get_wechat_hwnd() -> int | None:
                         parts = line.replace('"', '').split(',')
                         if len(parts) >= 2:
                             try:
-                                pid = int(parts[1].strip())
+                                pids.append(int(parts[1].strip()))
                             except ValueError:
                                 pass
             except Exception:
                 pass
-            if pid:
-                break
-        if not pid:
-            continue
 
-        best = None
-        best_score = -1
-        WNDENUMPROC2 = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        confirm_hwnd = None
+        main_hwnd = None
 
-        @WNDENUMPROC2
-        def _enum2(hwnd, _lp):
-            nonlocal best, best_score
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        @WNDENUMPROC
+        def _enum(hwnd, _lp):
+            nonlocal confirm_hwnd, main_hwnd
             wp = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
-            if wp.value != pid:
+            if wp.value not in pids:
+                return True
+            if not user32.IsWindowVisible(hwnd):
                 return True
             r = wintypes.RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(r))
             ww, hh = r.right - r.left, r.bottom - r.top
-            if ww < 500 or hh < 400:
-                return True
-            visible = user32.IsWindowVisible(hwnd)
-            if not visible:
+            if ww < 300 or hh < 300:
                 return True
             length = user32.GetWindowTextLengthW(hwnd)
             buf = ctypes.create_unicode_buffer(max(256, length + 1))
             user32.GetWindowTextW(hwnd, buf, 256)
             title = buf.value
-            score = ww * hh // 10000 + (20 if visible else 0) + (10 if title else 0)
-            if score > best_score:
-                best_score = score
-                best = hwnd
+            # 主窗口标题含"微信"，确认对话框标题通常为空
+            if "微信" in title or "Weixin" in title:
+                if ww >= 500 and hh >= 400:
+                    main_hwnd = hwnd
+            else:
+                confirm_hwnd = hwnd
+            return True
+
+        user32.EnumWindows(_enum, 0)
+
+        if main_hwnd:
+            return "main_window"
+        if confirm_hwnd:
+            # 截图 + OCR 确认
+            try:
+                img = capture_window(confirm_hwnd, client_only=True)
+                if img is not None:
+                    for kw in ("确认登录", "请在手机", "已登录"):
+                        if find_text_center(img, kw, confidence=0.35):
+                            return "confirm_dialog"
+            except Exception:
+                pass
+            return "confirm_dialog"  # 有小窗口但无标题，99% 是确认弹窗
+
+        time.sleep(1)
+    return None
+
+
+def await_login_main_window(pyautogui, subprocess, label: str = "", timeout: int = 60) -> int | None:
+    """轮询等待微信主窗口出现。
+
+    策略（激进）：
+      1. 枚举当前所有 WeChat/Weixin 进程的 PID（不依赖启动时的 PID）
+      2. 枚举所有 >= 300x200 的顶层窗口，无论是否可见
+      3. 按面积排序，选最大的那个 → ShowWindow + SetForegroundWindow
+      4. 每次迭代都会主动 ShowWindow 所有候选窗口
+    """
+    print(f"[WECHAT-LOGIN] 等待主窗口出现 ({label})...")
+    for i in range(timeout):
+        time.sleep(1)
+
+        # 获取所有 WeChat/Weixin 的 PID（可能有多个进程）
+        pids = []
+        for name in ("WeChat.exe", "Weixin.exe"):
+            try:
+                out = subprocess.check_output(
+                    f'tasklist /FI "IMAGENAME eq {name}" /FO CSV /NH',
+                    shell=True, text=True
+                )
+                for line in out.strip().split('\n'):
+                    if name in line:
+                        parts = line.replace('"', '').split(',')
+                        if len(parts) >= 2:
+                            try:
+                                pids.append(int(parts[1].strip()))
+                            except ValueError:
+                                pass
+            except Exception:
+                pass
+        if not pids:
+            if i % 10 == 9:
+                print(f"[WECHAT-LOGIN] WeChat 进程未找到 ({i+1}s)...")
+            continue
+
+        # 暴力枚举所有窗口，ShowWindow 恢复每个候选
+        candidates = []
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        @WNDENUMPROC
+        def _enum2(hwnd, _lp):
+            wp = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+            if wp.value not in pids:
+                return True
+            r = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(r))
+            ww, hh = r.right - r.left, r.bottom - r.top
+            # 主窗口至少 300×200（放宽阈值，应对各种 DPI）
+            if ww < 300 or hh < 200:
+                return True
+            # 过滤托盘虚拟坐标
+            if r.left <= -30000 or r.top <= -30000:
+                return True
+            cls_buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cls_buf, 256)
+            # 过滤托盘消息窗口（全屏透明浮层，不是真正的主窗口）
+            if "TrayIcon" in cls_buf.value or "Tray" in cls_buf.value:
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(max(256, length + 1))
+            user32.GetWindowTextW(hwnd, buf, 256)
+            visible = user32.IsWindowVisible(hwnd)
+            candidates.append((hwnd, ww, hh, buf.value, cls_buf.value, visible))
             return True
 
         user32.EnumWindows(_enum2, 0)
-        if best:
-            user32.SetForegroundWindow(best)
-            time.sleep(1)
-            print(f"[WECHAT] 主窗口就绪: hwnd={best}")
-            return best
-        if i % 5 == 4:
-            print(f"[WECHAT] 等待主窗口... ({i+1}s)")
 
-    print("[WECHAT] 主窗口未出现，可能需要手动登录")
+        if not candidates:
+            if i % 10 == 9:
+                print(f"[WECHAT-LOGIN] 枚举 {len(pids)} 个进程，无候选窗口 ({i+1}s)...")
+            continue
+
+        # 对所有候选窗口尝试恢复
+        for hwnd, w, h, title, cls, vis in candidates:
+            if not vis:
+                user32.ShowWindow(hwnd, SW_SHOWNORMAL)
+                print(f"[WECHAT-LOGIN] ShowWindow 恢复: hwnd={hwnd} {w}x{h} title=\"{title}\" cls=\"{cls}\"")
+            else:
+                print(f"[WECHAT-LOGIN] 候选窗口: hwnd={hwnd} {w}x{h} title=\"{title}\" cls=\"{cls}\" vis={vis}")
+
+        time.sleep(0.5)
+
+        # 按面积降序，取最大的
+        candidates.sort(key=lambda c: -(c[1] * c[2]))
+        best = candidates[0][0]
+
+        user32.ShowWindow(best, SW_SHOWNORMAL)
+        time.sleep(0.2)
+        user32.SetForegroundWindow(best)
+        time.sleep(0.3)
+
+        retried = 0
+        while user32.GetForegroundWindow() != best and retried < 5:
+            user32.SetForegroundWindow(best)
+            time.sleep(0.3)
+            retried += 1
+
+        print(f"[WECHAT-LOGIN] 主窗口就绪: hwnd={best} {candidates[0][1]}x{candidates[0][2]} title=\"{candidates[0][3]}\"")
+        return best
+
+    print(f"[WECHAT-LOGIN] 超时 ({timeout}s)，主窗口未出现")
     return None
 
 
