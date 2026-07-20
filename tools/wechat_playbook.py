@@ -154,7 +154,7 @@ def lookup_button(keyword: str, button_type: str, client_w: int, client_h: int) 
 
     Args:
         keyword: 服务号关键词
-        button_type: "follow" | "send_msg"
+        button_type: "follow" | "send_msg" | "keyboard_toggle" | "input_box"
         client_w, client_h: 当前窗口客户区尺寸
 
     Returns:

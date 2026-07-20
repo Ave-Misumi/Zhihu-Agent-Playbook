@@ -697,13 +697,13 @@ def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
         except Exception as e:
             print(f"[WECHAT] OCR 失败，将使用固定位置: {e}")
 
-    # 策略 2：固定第一条区域
     if target_point is None:
-        target_point = (img_w // 2, 150)
-        print(f"[WECHAT] 使用固定第一条结果位置: {target_point}")
+        print("[WECHAT] OCR 未找到关键词，且 playbook 无缓存")
+        save_search_miss(keyword) if keyword else None
+        return False
 
-    # 保存到 playbook（仅视觉/OCR 定位成功时，避免缓存固定兜底坐标）
-    if keyword and not used_playbook and target_point != (img_w // 2, 150):
+    # 保存到 playbook（视觉/OCR 定位成功时）
+    if keyword and not used_playbook:
         save_search_result(keyword, target_point[0], target_point[1], img_w, img_h)
 
     # 调试截图
@@ -820,21 +820,16 @@ def _click_follow_in_detail_window(hwnd: int, keyword: str = "") -> None:
         target = _find_button_by_vision(hwnd, "follow_button.png", prefer_right=False)
 
     if target is None:
-        # 兜底：默认坐标（屏幕坐标）
-        r = wintypes.RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(r))
-        cx = r.left + 200
-        cy = r.top + 350
-        print(f"[WECHAT] 详情窗口使用默认关注按钮位置: ({cx}, {cy})")
-        sx, sy = cx, cy
-    else:
-        cx, cy = target
-        sx, sy = _window_client_to_screen(hwnd, cx, cy)
-        print(f"[WECHAT] 定位关注按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+        print("[WECHAT] 视觉定位关注按钮失败，且 playbook 无缓存")
+        raise RuntimeError("无法定位关注按钮：视觉检测未找到绿色按钮或模板")
 
-        # 保存到 playbook（视觉定位成功时）
-        if keyword and not used_playbook and img_w > 0:
-            save_button(keyword, "follow", cx, cy, img_w, img_h)
+    cx, cy = target
+    sx, sy = _window_client_to_screen(hwnd, cx, cy)
+    print(f"[WECHAT] 定位关注按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+
+    # 保存到 playbook（视觉定位成功时）
+    if keyword and not used_playbook and img_w > 0:
+        save_button(keyword, "follow", cx, cy, img_w, img_h)
 
     pyautogui.moveTo(sx, sy, duration=0.15)
     pyautogui.click(sx, sy)
@@ -890,21 +885,16 @@ def _click_send_msg_in_detail_window(hwnd: int, keyword: str = "") -> None:
         target = _find_button_by_vision(hwnd, "send_msg_button.png", prefer_right=True)
 
     if target is None:
-        # 兜底：默认坐标
-        r = wintypes.RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(r))
-        cx = r.left + 350
-        cy = r.top + 350
-        print(f"[WECHAT] 详情窗口使用默认私信按钮位置: ({cx}, {cy})")
-        sx, sy = cx, cy
-    else:
-        cx, cy = target
-        sx, sy = _window_client_to_screen(hwnd, cx, cy)
-        print(f"[WECHAT] 定位私信按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+        print("[WECHAT] 视觉定位私信按钮失败，且 playbook 无缓存")
+        raise RuntimeError("无法定位私信按钮：视觉检测未找到绿色按钮或模板")
 
-        # 保存到 playbook
-        if keyword and not used_playbook and img_w > 0:
-            save_button(keyword, "send_msg", cx, cy, img_w, img_h)
+    cx, cy = target
+    sx, sy = _window_client_to_screen(hwnd, cx, cy)
+    print(f"[WECHAT] 定位私信按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+
+    # 保存到 playbook
+    if keyword and not used_playbook and img_w > 0:
+        save_button(keyword, "send_msg", cx, cy, img_w, img_h)
 
     pyautogui.moveTo(sx, sy, duration=0.15)
     pyautogui.click(sx, sy)
@@ -962,6 +952,31 @@ def _find_button_by_vision(hwnd: int, template_name: str, prefer_right: bool = F
         print(f"[WECHAT-VISION] 放宽范围后定位绿色按钮: {center}")
         visualize_detection(img, center, save_path=DEFAULT_TEMPLATE_DIR / f"debug_color2_{template_name}")
         return center
+
+    # 策略 5：非绿色按钮——全图 OCR 文字定位
+    # 私信/发消息按钮是灰/白底黑字，不匹配绿色 HSV。
+    # 限制上半区域（按钮都在上半）、搜多组候选词、极低置信度。
+    print(f"[WECHAT-VISION] 绿色策略未命中，启用全图 OCR 搜索非绿色按钮...")
+    roi = img[: int(img_h * 0.55), :]
+    search_texts = ["私信", "发消息", "进入公众号", "聊天"] if prefer_right else ["关注", "已关注", "添加到通讯录"]
+    for text in search_texts:
+        center = find_text_center(roi, text, confidence=0.25)
+        if center:
+            result = (center[0], center[1])
+            print(f"[WECHAT-VISION] OCR 定位非绿色按钮「{text}」: {result}")
+            visualize_detection(img, result, save_path=DEFAULT_TEMPLATE_DIR / f"debug_ocr_{template_name}")
+            return result
+
+    # 兜底：dump 全图 OCR 文字（便于后续调试）
+    all_texts = _ocr_image(roi)
+    top = sorted([t for t in all_texts if t[2] >= 0.20], key=lambda t: -t[2])[:20]
+    print(f"[WECHAT-VISION] 全图 OCR 前 20 结果 (conf≥0.20):")
+    for txt, bbox, conf in top:
+        xs = [p[0] for p in bbox]
+        ys = [p[1] for p in bbox]
+        cx = int(sum(xs) / len(xs))
+        cy = int(sum(ys) / len(ys))
+        print(f"  「{txt}」 conf={conf:.2f} pos=({cx},{cy})")
 
     return None
 
@@ -1027,38 +1042,109 @@ def _click_send_msg_button(hwnd: int) -> None:
     time.sleep(2.0)
 
 
-def _goto_message_input(hwnd: int) -> None:
+def _goto_message_input(hwnd: int, keyword: str = "") -> None:
     """在私信窗口中点击右下角键盘按钮，切换到输入框模式。
 
-    从截图看，窗口底部有菜单栏（产品介绍、操作视频、联系我们），
-    右下角有一个键盘图标按钮，点击后才会出现输入框。
+    视觉定位键盘切换按钮（右下角小图标），然后定位输入框区域。
+    找不到任何特征则抛出 RuntimeError。
+
+    Playbook 缓存:
+      - keyboard_toggle: 键盘切换按钮坐标
+      - input_box: 输入框中心坐标
     """
     import pyautogui
     time.sleep(2.0)
 
-    r = wintypes.RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(r))
-    win_w = r.right - r.left
-    win_h = r.bottom - r.top
+    img = capture_window(hwnd, client_only=True)
+    if img is None or img.size == 0:
+        raise RuntimeError("无法截取私信窗口")
 
-    # 键盘按钮在右下角，约在窗口右边缘 -40px，底部 -40px 处
-    cx = r.right - 40
-    cy = r.bottom - 40
+    img_h, img_w = img.shape[:2]
 
-    print(f"[WECHAT] 私信窗口 {win_w}x{win_h} at ({r.left},{r.top}), 键盘按钮估计位置: ({cx}, {cy})")
+    # ── 键盘切换按钮 ──
+    kb_target = None
 
-    pyautogui.moveTo(cx, cy, duration=0.15)
-    pyautogui.click(cx, cy)
-    time.sleep(1.5)
+    # playbook 优先
+    if keyword and img_w > 0:
+        kb_target = lookup_button(keyword, "keyboard_toggle", img_w, img_h)
+        if kb_target:
+            print(f"[WECHAT] Playbook 命中键盘切换按钮: {kb_target}")
 
-    # 点击键盘按钮后，应该出现输入框
-    # 输入框通常在底部，约在窗口底部往上 50px 处
-    input_cx = r.left + win_w // 2
-    input_cy = r.bottom - 50
-    print(f"[WECHAT] 输入框估计位置: ({input_cx}, {input_cy})")
-    pyautogui.moveTo(input_cx, input_cy, duration=0.15)
-    pyautogui.click(input_cx, input_cy)
+    if kb_target is None:
+        # 视觉定位右下角键盘/输入切换按钮（限制在窗口右下角 15% 区域）
+        roi_right = img[int(img_h * 0.75):, int(img_w * 0.82):]
+        kb_center = find_green_button(roi_right, min_area=80, max_area=5000)
+        if kb_center:
+            rx, ry = kb_center
+            kb_target = (int(img_w * 0.82) + rx, int(img_h * 0.75) + ry)
+            print(f"[WECHAT] 检测到输入切换按钮: 客户区{kb_target}")
+        else:
+            # 无绿色按钮 → 尝试 OCR 找「功能」「键盘」等
+            for kw in ("功能", "键盘", "输入", "表情"):
+                center = find_text_center(img, kw, confidence=0.35)
+                if center:
+                    kb_target = center
+                    print(f"[WECHAT] OCR 定位切换入口「{kw}」: {kb_target}")
+                    break
+
+    if kb_target is not None:
+        _click_at(hwnd, kb_target[0], kb_target[1])
+        time.sleep(1.5)
+        # 保存到 playbook
+        if keyword and img_w > 0:
+            save_button(keyword, "keyboard_toggle", kb_target[0], kb_target[1], img_w, img_h)
+    else:
+        print("[WECHAT] 未检测到键盘切换按钮，假定已在输入模式")
+
+    # ── 输入框 ──
+    input_target = None
+
+    # playbook 优先
+    if keyword and img_w > 0:
+        input_target = lookup_button(keyword, "input_box", img_w, img_h)
+        if input_target:
+            print(f"[WECHAT] Playbook 命中输入框: {input_target}")
+
+    if input_target is None:
+        img2 = capture_window(hwnd, client_only=True)
+        if img2 is None or img2.size == 0:
+            raise RuntimeError("无法截取私信窗口（第二次）")
+
+        img_h2, img_w2 = img2.shape[:2]
+        bottom_roi = img2[int(img_h2 * 0.7):, :]
+
+        import cv2
+        import numpy as np
+        gray = cv2.cvtColor(bottom_roi, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        for cnt in sorted(contours, key=cv2.contourArea, reverse=True):
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            aspect = bw / max(bh, 1)
+            if 2.0 <= aspect <= 20.0 and bw > img_w2 * 0.3:
+                input_target = (x + bw // 2, int(img_h2 * 0.7) + y + bh // 2)
+                print(f"[WECHAT] 检测到输入框: 客户区{input_target}, {bw}x{bh}, aspect={aspect:.1f}")
+                break
+
+        # 轮廓未命中 → OCR 兜底找「请输入」「按住说话」
+        if input_target is None:
+            for kw in ("请输入", "输入", "按住说话", "写留言"):
+                center = find_text_center(img2, kw, confidence=0.3)
+                if center:
+                    input_target = center
+                    print(f"[WECHAT] OCR 定位输入区域「{kw}」: {input_target}")
+                    break
+
+    if input_target is None:
+        raise RuntimeError("无法定位输入框：视觉检测未找到浅色矩形区域")
+
+    _click_at(hwnd, input_target[0], input_target[1])
     time.sleep(0.5)
+
+    # 保存到 playbook
+    if keyword and img_w > 0:
+        save_button(keyword, "input_box", input_target[0], input_target[1], img_w, img_h)
 
 
 def _send_message(hwnd: int, message: str) -> None:
@@ -1174,7 +1260,7 @@ async def wechat_search_and_follow(
                 return f"❌ 点击「私信」后未能进入聊天窗口。原因: {detail}"
 
             # ── Step 5: 输入并发送消息 → 验证 ──
-            _goto_message_input(chat_hwnd)
+            _goto_message_input(chat_hwnd, keyword=keyword)
 
             ok, detail = verify_input_box_visible(chat_hwnd)
             if not ok:
@@ -1213,7 +1299,7 @@ async def wechat_send_message(
         _navigate_to_first_result(hwnd)
 
         # 进入聊天后直接发消息
-        _goto_message_input(hwnd)
+        _goto_message_input(hwnd, keyword=contact_name)
         _send_message(hwnd, message)
 
         return f"已给「{contact_name}」发送消息"
