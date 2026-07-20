@@ -491,41 +491,38 @@ def _get_wechat_hwnd() -> int | None:
     elif login_mode == "login_button":
         # 有绿色登录按钮 → 点击
         _click_login_button(img, login_rect, login_hwnd)
-        time.sleep(1.5)
+        time.sleep(0.3)  # 让 UI 渲染一下
 
-        # 点击后只有两种互斥结果：主窗口出现 OR 手机确认弹窗
-        # 统一轮询同时检测两者
-        print("[WECHAT] 点击登录按钮，等待响应...")
-        for i in range(30):
+        # 立刻检测：手机确认弹窗 OR 主窗口直接登录
+        mode = _ocr_screen_for_login_mode(login_hwnd)
+        if mode == "confirm_dialog":
+            print("[WECHAT] ╔══════════════════════════════════╗")
+            print("[WECHAT] ║  请在手机微信上点击「确认登录」    ║")
+            print("[WECHAT] ║  完成后等待或按 Enter 继续        ║")
+            print("[WECHAT] ╚══════════════════════════════════╝")
+            hwnd = _wait_for_login_with_prompt(pyautogui, subprocess, "手机确认登录", timeout=60)
+            if hwnd:
+                return hwnd
+            print("[WECHAT] 超时未检测到主窗口")
+            return None
+
+        # 没有确认弹窗 → 等主窗口出现（直接登录的情况）
+        hwnd_main = _find_wechat_hwnd()
+        if hwnd_main:
+            _ensure_foreground(hwnd_main)
+            _CACHED_HWND = hwnd_main
+            print(f"[WECHAT] 登录成功，主窗口就绪: hwnd={hwnd_main}")
+            return hwnd_main
+
+        # 第一次没检测到，轮询 4s
+        for i in range(8):
             time.sleep(0.5)
-
-            # 1. 检测主窗口
             hwnd_main = _find_wechat_hwnd()
             if hwnd_main:
                 _ensure_foreground(hwnd_main)
                 _CACHED_HWND = hwnd_main
                 print(f"[WECHAT] 登录成功，主窗口就绪: hwnd={hwnd_main}")
                 return hwnd_main
-
-            # 2. 检测手机确认弹窗（全屏 OCR，不依赖窗口枚举）
-            if i % 4 == 0:  # 每 2s 做一次 OCR
-                mode = _ocr_screen_for_login_mode()
-                if mode == "confirm_dialog":
-                    print("[WECHAT] ╔══════════════════════════════════╗")
-                    print("[WECHAT] ║  请在手机微信上点击「确认登录」    ║")
-                    print("[WECHAT] ║  完成后等待或按 Enter 继续        ║")
-                    print("[WECHAT] ╚══════════════════════════════════╝")
-                    hwnd = _wait_for_login_with_prompt(pyautogui, subprocess, "手机确认登录", timeout=60)
-                    if hwnd:
-                        return hwnd
-                    print("[WECHAT] 超时未检测到主窗口")
-                    return None
-                elif mode == "main_window":
-                    # OCR 检测到了主窗口文字，重试窗口枚举
-                    continue
-
-            if i % 10 == 9:
-                print(f"[WECHAT] 等待登录响应... ({i*0.5:.0f}s)")
 
         print("[WECHAT] 登录超时，未检测到主窗口或确认弹窗")
         return None
@@ -666,11 +663,11 @@ def _get_wechat_hwnd() -> int | None:
 # 登录辅助函数
 # ═══════════════════════════════════════════════
 
-def _ocr_screen_for_login_mode() -> str | None:
-    """兜底：直接截取整个屏幕 OCR 检测登录状态。
+def _ocr_screen_for_login_mode(hwnd: int = 0) -> str | None:
+    """截取微信窗口 OCR 检测登录状态。
 
-    当窗口枚举失败时（Qt 单窗口复用 hwnd 切换内容），
-    直接全屏截图 + OCR 搜索关键词。
+    hwnd=0 时用 pyautogui 全屏截图兜底；hwnd 有效时用 capture_window
+    截取指定窗口（不受其他窗口遮挡影响）。
 
     Returns:
         "confirm_dialog" / "main_window" / None
@@ -678,32 +675,39 @@ def _ocr_screen_for_login_mode() -> str | None:
     try:
         import pyautogui
         import numpy as np
-        ss = pyautogui.screenshot()
-        img = np.array(ss)
-        img = img[:, :, ::-1]  # RGB → BGR
+        if hwnd and hwnd != 0:
+            img = capture_window(hwnd, client_only=True)
+            if img is None or img.size == 0:
+                ss = pyautogui.screenshot()
+                img = np.array(ss)
+                img = img[:, :, ::-1]
+        else:
+            ss = pyautogui.screenshot()
+            img = np.array(ss)
+            img = img[:, :, ::-1]  # RGB → BGR
 
         # 检测微信主窗口文字特征
         main_kws = ["微信", "通讯录", "聊天", "消息"]
         for kw in main_kws:
             if find_text_center(img, kw, confidence=0.35):
                 # 确认不是登录面板 → 检查是否同时有确认文字
-                for ck in ("确认登录", "请在手机"):
+                for ck in ("确认登录", "请在手机", "需在手机上完成", "完成登录", "取消"):
                     if find_text_center(img, ck, confidence=0.35):
-                        print(f"[WECHAT-LOGIN] 全屏OCR: 「{kw}」+「{ck}」→ confirm_dialog")
+                        print(f"[WECHAT-LOGIN] OCR: 「{kw}」+「{ck}」→ confirm_dialog")
                         return "confirm_dialog"
-                print(f"[WECHAT-LOGIN] 全屏OCR: 「{kw}」→ main_window")
+                print(f"[WECHAT-LOGIN] OCR: 「{kw}」→ main_window")
                 return "main_window"
 
         # 检测确认弹窗特征
-        confirm_kws = ["确认登录", "请在手机上", "已登录设备"]
+        confirm_kws = ["确认登录", "请在手机上", "已登录设备", "需在手机上完成登录", "完成登录", "取消"]
         for kw in confirm_kws:
             if find_text_center(img, kw, confidence=0.35):
-                print(f"[WECHAT-LOGIN] 全屏OCR: 「{kw}」→ confirm_dialog")
+                print(f"[WECHAT-LOGIN] OCR: 「{kw}」→ confirm_dialog")
                 return "confirm_dialog"
 
-        print(f"[WECHAT-LOGIN] 全屏OCR: 未检测到任何登录状态文字")
+        print(f"[WECHAT-LOGIN] OCR: 未检测到任何登录状态文字")
     except Exception as e:
-        print(f"[WECHAT-LOGIN] 全屏OCR异常: {e}")
+        print(f"[WECHAT-LOGIN] OCR异常: {e}")
     return None
 
 
@@ -724,7 +728,7 @@ def _detect_login_mode(img, login_rect: tuple) -> str:
     img_h, img_w = img.shape[:2]
 
     # ═══ 第一步：检测确认对话框特征（优先级最高）───
-    confirm_texts = ["请在手机", "点击确认登录"]
+    confirm_texts = ["请在手机", "点击确认登录", "需在手机上完成登录", "完成登录", "取消"]
     for text in confirm_texts:
         center = find_text_center(img, text, confidence=0.35)
         if center:
