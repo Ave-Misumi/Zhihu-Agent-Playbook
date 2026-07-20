@@ -491,20 +491,43 @@ def _get_wechat_hwnd() -> int | None:
     elif login_mode == "login_button":
         # 有绿色登录按钮 → 点击
         _click_login_button(img, login_rect, login_hwnd)
-        time.sleep(2)
+        time.sleep(1.5)
 
-        # 点击后可能：直接进入主窗口 / 弹出确认对话框
-        hwnd_main = await_login_main_window(pyautogui, subprocess, "登录后进入主界面", timeout=25)
-        if hwnd_main:
-            return hwnd_main
+        # 点击后只有两种互斥结果：主窗口出现 OR 手机确认弹窗
+        # 统一轮询同时检测两者
+        print("[WECHAT] 点击登录按钮，等待响应...")
+        for i in range(30):
+            time.sleep(0.5)
 
-        # 检测是否弹出手机确认对话框
-        confirm = detect_confirm_dialog(pyautogui, subprocess, timeout=5)
-        if confirm == "confirm_dialog":
-            print("[WECHAT] 登录按钮已点击，等待用户在手机上确认...")
-            return await_login_main_window(pyautogui, subprocess, "手机确认登录", timeout=60)
+            # 1. 检测主窗口
+            hwnd_main = _find_wechat_hwnd()
+            if hwnd_main:
+                _ensure_foreground(hwnd_main)
+                _CACHED_HWND = hwnd_main
+                print(f"[WECHAT] 登录成功，主窗口就绪: hwnd={hwnd_main}")
+                return hwnd_main
 
-        print("[WECHAT] 登录按钮点击后未检测到主窗口或确认对话框")
+            # 2. 检测手机确认弹窗（全屏 OCR，不依赖窗口枚举）
+            if i % 4 == 0:  # 每 2s 做一次 OCR
+                mode = _ocr_screen_for_login_mode()
+                if mode == "confirm_dialog":
+                    print("[WECHAT] ╔══════════════════════════════════╗")
+                    print("[WECHAT] ║  请在手机微信上点击「确认登录」    ║")
+                    print("[WECHAT] ║  完成后等待或按 Enter 继续        ║")
+                    print("[WECHAT] ╚══════════════════════════════════╝")
+                    hwnd = _wait_for_login_with_prompt(pyautogui, subprocess, "手机确认登录", timeout=60)
+                    if hwnd:
+                        return hwnd
+                    print("[WECHAT] 超时未检测到主窗口")
+                    return None
+                elif mode == "main_window":
+                    # OCR 检测到了主窗口文字，重试窗口枚举
+                    continue
+
+            if i % 10 == 9:
+                print(f"[WECHAT] 等待登录响应... ({i*0.5:.0f}s)")
+
+        print("[WECHAT] 登录超时，未检测到主窗口或确认弹窗")
         return None
 
     elif login_mode == "qr_code":
@@ -513,7 +536,7 @@ def _get_wechat_hwnd() -> int | None:
         while True:
             print("[WECHAT] ╔══════════════════════════════════╗")
             print("[WECHAT] ║  请用手机微信扫描二维码登录        ║")
-            print("[WECHAT] ║  扫码完成后按 Enter 继续...        ║")
+            print("[WECHAT] ║  扫描完成后等待或按 Enter 继续    ║")
             print("[WECHAT] ╚══════════════════════════════════╝")
             # 等待期间隔 5 秒检查是否已经登录成功（用户可能提前扫码 + 手机确认）
             while True:
@@ -642,6 +665,47 @@ def _get_wechat_hwnd() -> int | None:
 # ═══════════════════════════════════════════════
 # 登录辅助函数
 # ═══════════════════════════════════════════════
+
+def _ocr_screen_for_login_mode() -> str | None:
+    """兜底：直接截取整个屏幕 OCR 检测登录状态。
+
+    当窗口枚举失败时（Qt 单窗口复用 hwnd 切换内容），
+    直接全屏截图 + OCR 搜索关键词。
+
+    Returns:
+        "confirm_dialog" / "main_window" / None
+    """
+    try:
+        import pyautogui
+        import numpy as np
+        ss = pyautogui.screenshot()
+        img = np.array(ss)
+        img = img[:, :, ::-1]  # RGB → BGR
+
+        # 检测微信主窗口文字特征
+        main_kws = ["微信", "通讯录", "聊天", "消息"]
+        for kw in main_kws:
+            if find_text_center(img, kw, confidence=0.35):
+                # 确认不是登录面板 → 检查是否同时有确认文字
+                for ck in ("确认登录", "请在手机"):
+                    if find_text_center(img, ck, confidence=0.35):
+                        print(f"[WECHAT-LOGIN] 全屏OCR: 「{kw}」+「{ck}」→ confirm_dialog")
+                        return "confirm_dialog"
+                print(f"[WECHAT-LOGIN] 全屏OCR: 「{kw}」→ main_window")
+                return "main_window"
+
+        # 检测确认弹窗特征
+        confirm_kws = ["确认登录", "请在手机上", "已登录设备"]
+        for kw in confirm_kws:
+            if find_text_center(img, kw, confidence=0.35):
+                print(f"[WECHAT-LOGIN] 全屏OCR: 「{kw}」→ confirm_dialog")
+                return "confirm_dialog"
+
+        print(f"[WECHAT-LOGIN] 全屏OCR: 未检测到任何登录状态文字")
+    except Exception as e:
+        print(f"[WECHAT-LOGIN] 全屏OCR异常: {e}")
+    return None
+
 
 def _detect_login_mode(img, login_rect: tuple) -> str:
     """通过 OCR 分析登录面板截图，判断当前处于哪种登录模式。
@@ -799,6 +863,42 @@ def detect_confirm_dialog(pyautogui, subprocess, timeout: int = 5) -> str | None
     return None
 
 
+def _wait_for_login_with_prompt(pyautogui, subprocess, label: str = "", timeout: int = 60) -> int | None:
+    """等待主窗口出现，同时允许用户按 Enter 手动触发重检测。
+
+    每轮循环：
+      1. 用 _find_wechat_hwnd 检测主窗口 → 出现即返回
+      2. 等待 5s，期间用 msvcrt.kbhit 检测用户按键
+      3. 用户按 Enter → 打印提示，继续循环（用户手动触发重试）
+    """
+    import msvcrt
+    print(f"[WECHAT-LOGIN] 等待主窗口出现 ({label}, {timeout}s)...")
+    start = time.time()
+    while time.time() - start < timeout:
+        # 先检测主窗口
+        hwnd = _find_wechat_hwnd()
+        if hwnd:
+            _ensure_foreground(hwnd)
+            _CACHED_HWND = hwnd
+            print(f"[WECHAT-LOGIN] 主窗口就绪: hwnd={hwnd}")
+            return hwnd
+
+        # 等待 kbhit（5s 窗口）
+        for _ in range(10):
+            elapsed = time.time() - start
+            if elapsed >= timeout:
+                break
+            if msvcrt.kbhit():
+                msvcrt.getch()
+                remaining = timeout - int(elapsed)
+                print(f"[WECHAT-LOGIN] 用户按 Enter，继续等待 ({remaining}s 剩余)...")
+                break
+            time.sleep(0.5)
+
+    print(f"[WECHAT-LOGIN] 超时 ({timeout}s)")
+    return None
+
+
 def await_login_main_window(pyautogui, subprocess, label: str = "", timeout: int = 60) -> int | None:
     """轮询等待微信主窗口出现。
 
@@ -848,8 +948,8 @@ def await_login_main_window(pyautogui, subprocess, label: str = "", timeout: int
             r = wintypes.RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(r))
             ww, hh = r.right - r.left, r.bottom - r.top
-            # 主窗口至少 300×200（放宽阈值，应对各种 DPI）
-            if ww < 300 or hh < 200:
+            # 主窗口至少 500×400（和登录面板 442×581 区分开）
+            if ww < 500 or hh < 400:
                 return True
             # 过滤托盘虚拟坐标
             if r.left <= -30000 or r.top <= -30000:
