@@ -691,7 +691,7 @@ def _ocr_screen_for_login_mode(hwnd: int = 0) -> str | None:
         for kw in main_kws:
             if find_text_center(img, kw, confidence=0.35):
                 # 确认不是登录面板 → 检查是否同时有确认文字
-                for ck in ("确认登录", "请在手机", "需在手机上完成", "完成登录", "取消"):
+                for ck in ("请在手机上确认", "需在手机上完成登录"):
                     if find_text_center(img, ck, confidence=0.35):
                         print(f"[WECHAT-LOGIN] OCR: 「{kw}」+「{ck}」→ confirm_dialog")
                         return "confirm_dialog"
@@ -699,7 +699,7 @@ def _ocr_screen_for_login_mode(hwnd: int = 0) -> str | None:
                 return "main_window"
 
         # 检测确认弹窗特征
-        confirm_kws = ["确认登录", "请在手机上", "已登录设备", "需在手机上完成登录", "完成登录", "取消"]
+        confirm_kws = ["确认登录", "请在手机上确认", "已登录设备", "需在手机上完成登录", "请在其他设备"]
         for kw in confirm_kws:
             if find_text_center(img, kw, confidence=0.35):
                 print(f"[WECHAT-LOGIN] OCR: 「{kw}」→ confirm_dialog")
