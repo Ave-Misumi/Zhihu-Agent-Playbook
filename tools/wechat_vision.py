@@ -13,6 +13,18 @@
 import os
 import time
 import ctypes
+
+# 抑制 EasyOCR / PyTorch 在 CPU 上的例行警告
+os.environ.setdefault("PYTHONWARNINGS", "ignore")
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*pin_memory.*")
+warnings.filterwarnings("ignore", message=".*CUDA.*")
+warnings.filterwarnings("ignore", message=".*MPS.*")
+warnings.filterwarnings("ignore", message=".*quantize_per_tensor.*")
+warnings.filterwarnings("ignore", message=".*quantize_per_channel.*")
+warnings.filterwarnings("ignore", message=".*quantized.*deprecated.*")
 from ctypes import wintypes
 from pathlib import Path
 
