@@ -155,37 +155,73 @@ def verify_follow_success(hwnd: int) -> tuple[bool, str]:
 def verify_chat_window_entered(hwnd: int) -> tuple[bool, str]:
     """Step 4 → 验证已从详情页进入聊天窗口。
 
-    策略：
-      1. 确认详情页特征（贴图/文章/视频号）消失
-      2. 检测聊天窗口特征：底部菜单、输入区元素
-      3. 两者都不确定 → 宽松放过（避免误杀）
+    策略（快速通道优先）：
+      1. 检测聊天窗口底部特征（菜单栏: 产品介绍/操作视频/联系我们/功能）
+      2. 确认详情页特征消失
+      3. 都失败才保存调试截图
     """
-    detail_ok, _ = _ocr_texts_in_roi(
+    # 优先检测聊天特征（底部菜单栏在服务号聊天中是固定元素）
+    chat_ok, chat_text = _ocr_texts_in_roi(
+        hwnd,
+        texts=["产品介绍", "操作视频", "联系我们", "功能",
+               "按住说话", "语音", "表情", "发送"],
+        y_start_pct=0.55,
+        y_end_pct=1.0,
+        confidence=0.25,
+        step_label="chat",
+    )
+
+    if chat_ok:
+        return True, f"检测到聊天特征: {chat_text}"
+
+    # 快速判断详情页特征是否存在（不保存调试截图）
+    detail_still = _check_texts_quiet(
         hwnd,
         texts=["贴图", "文章", "视频号"],
         y_start_pct=0,
         y_end_pct=0.3,
         confidence=0.35,
-        step_label="chat_detail",
     )
 
-    chat_ok, chat_text = _ocr_texts_in_roi(
-        hwnd,
-        texts=["产品介绍", "操作视频", "联系我们", "发消息",
-               "按住说话", "语音", "表情", "发送", "功能"],
-        y_start_pct=0.5,
-        y_end_pct=1.0,
-        confidence=0.30,
-        step_label="chat",
-    )
-
-    if detail_ok and not chat_ok:
+    if detail_still:
         return False, "仍在详情页（检测到贴图/文章/视频号），未进入聊天窗口"
-    if chat_ok:
-        return True, f"检测到聊天特征: {chat_text}"
-    if not detail_ok:
-        return True, "详情页特征已消失，假定已进入聊天"
-    return False, "无法确认聊天窗口状态"
+
+    # 详情页特征消失 → 可能已进入聊天
+    return True, "详情页特征已消失，假定已进入聊天"
+
+
+def _check_texts_quiet(
+    hwnd: int,
+    texts: list[str],
+    y_start_pct: float = 0,
+    y_end_pct: float = 1.0,
+    x_start_pct: float = 0,
+    x_end_pct: float = 1.0,
+    confidence: float = 0.35,
+) -> bool:
+    """OCR 检查（不保存截图），返回 True/False。用于中间步骤的快速判断。"""
+    from .wechat_vision import capture_window, find_text_center
+    try:
+        img = capture_window(hwnd, client_only=True)
+    except Exception:
+        return False
+    if img is None or img.size == 0:
+        return False
+
+    h, w = img.shape[:2]
+    ry1 = max(0, int(h * y_start_pct))
+    ry2 = min(h, int(h * y_end_pct))
+    rx1 = max(0, int(w * x_start_pct))
+    rx2 = min(w, int(w * x_end_pct))
+    roi = img[ry1:ry2, rx1:rx2]
+    if roi.size == 0:
+        return False
+
+    for text in texts:
+        center = find_text_center(roi, text, confidence=confidence)
+        if center:
+            return True
+    return False
 
 
 def verify_input_box_visible(hwnd: int) -> tuple[bool, str]:
@@ -257,20 +293,89 @@ def verify_input_box_visible(hwnd: int) -> tuple[bool, str]:
 def verify_message_sent(hwnd: int, message: str) -> tuple[bool, str]:
     """Step 4c → 验证消息已发送。
 
-    检测聊天记录区域中的刚发送文字片段。
-    用消息前 4~8 个字做 OCR 匹配。
+    自己发送的消息在绿色气泡中（白字绿底），标准 OCR 准确性差。
+    使用多策略流水线：
+      1. 聊天气泡预处理（反转 + CLAHE + 自适应阈值）→ OCR
+      2. 短文本片段匹配（前 3/5/8 字分别试）
+      3. 右半区聚焦（自己的消息靠右）
     """
-    time.sleep(0.8)
+    time.sleep(1.0)
 
-    short = message.strip()[:8]
-    if len(short) < 2:
-        short = message.strip()
+    msg = message.strip()
+    if len(msg) < 2:
+        return False, "消息太短"
 
-    return _ocr_texts_in_roi(
-        hwnd,
-        texts=[short],
-        y_start_pct=0.1,
-        y_end_pct=0.85,
-        confidence=0.30,
-        step_label="msg_sent",
+    # 生成多条搜索片段（不同长度，避免 OCR 截断）
+    search_texts = []
+    for n in (3, 5, 8, len(msg)):
+        if n <= len(msg):
+            search_texts.append(msg[:n])
+    # 去重 + 去太短
+    search_texts = list(dict.fromkeys([t for t in search_texts if len(t) >= 2]))
+
+    try:
+        from .wechat_vision import capture_window
+        import cv2
+        img = capture_window(hwnd, client_only=True)
+    except Exception as e:
+        return False, f"截图失败: {e}"
+
+    if img is None or img.size == 0:
+        return False, "截图为空"
+
+    h, w = img.shape[:2]
+
+    # 策略 1: 原始图 → OCR，右半区
+    roi = img[int(h * 0.1):int(h * 0.85), int(w * 0.3):]
+    if roi.size > 0:
+        for text in search_texts:
+            center = find_text_center(roi, text, confidence=0.25)
+            if center:
+                return True, text
+
+    # 策略 2: 聊天气泡预处理（反转暗底 + CLAHE + 自适应阈值）
+    try:
+        from .wechat_ocr import preprocess_chat_bubble
+        preprocessed = preprocess_chat_bubble(img)
+        roi_pp = preprocessed[int(h * 0.1):int(h * 0.85), int(w * 0.3):]
+        if roi_pp.size > 0:
+            for text in search_texts:
+                center = find_text_center(roi_pp, text, confidence=0.20)
+                if center:
+                    return True, f"{text}(预处理)"
+    except ImportError:
+        pass
+
+    # 策略 3: 自适应阈值二值化 + 全文 OCR
+    try:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                        cv2.THRESH_BINARY, 15, 3)
+        roi_bin = binary[int(h * 0.1):int(h * 0.85), int(w * 0.3):]
+        if roi_bin.size > 0:
+            for text in search_texts:
+                center = find_text_center(roi_bin, text, confidence=0.15)
+                if center:
+                    return True, f"{text}(二值化)"
+    except Exception:
+        pass
+
+    # 全部失败 → 保存截图 + OCR dump
+    roi_rect = (int(w * 0.3), int(h * 0.1), int(w * 0.7), int(h * 0.75))
+    _save_debug_screenshot(img, hwnd, "msg_sent", roi_rect)
+
+    ocr_summary = ""
+    try:
+        from .wechat_vision import _ocr_image
+        ocr_results = _ocr_image(roi)
+        ocr_summary = ", ".join(
+            f"{r[0]}({r[2]:.0%})" for r in ocr_results[:20] if r[2] >= 0.15
+        ) if ocr_results else "(无识别结果)"
+    except Exception:
+        ocr_summary = "(OCR 异常)"
+
+    return False, (
+        f"未检测到消息 '{search_texts}' | "
+        f"ROI=右半区 [{int(w*0.3)}:{w}, {int(h*0.1)}:{int(h*0.85)}] | "
+        f"实际OCR: [{ocr_summary}]"
     )
