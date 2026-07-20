@@ -968,6 +968,7 @@ def _find_button_by_vision(hwnd: int, template_name: str, prefer_right: bool = F
             return result
 
     # 兜底：dump 全图 OCR 文字（便于后续调试）
+    from .wechat_vision import _ocr_image
     all_texts = _ocr_image(roi)
     top = sorted([t for t in all_texts if t[2] >= 0.20], key=lambda t: -t[2])[:20]
     print(f"[WECHAT-VISION] 全图 OCR 前 20 结果 (conf≥0.20):")
@@ -1043,16 +1044,20 @@ def _click_send_msg_button(hwnd: int) -> None:
 
 
 def _goto_message_input(hwnd: int, keyword: str = "") -> None:
-    """在私信窗口中点击右下角键盘按钮，切换到输入框模式。
+    """在私信窗口中定位输入区域。
 
-    视觉定位键盘切换按钮（右下角小图标），然后定位输入框区域。
-    找不到任何特征则抛出 RuntimeError。
+    策略：
+      1. OCR 检测是否已在输入模式（搜索「发送」「可以描述」等输入特征）
+      2. 若不在输入模式 → 视觉定位右下角键盘切换按钮并点击
+      3. 定位输入框区域（宽矩形 + 高度 > 30px，避免误判菜单栏）
 
     Playbook 缓存:
       - keyboard_toggle: 键盘切换按钮坐标
       - input_box: 输入框中心坐标
     """
     import pyautogui
+    import cv2
+    import numpy as np
     time.sleep(2.0)
 
     img = capture_window(hwnd, client_only=True)
@@ -1061,40 +1066,83 @@ def _goto_message_input(hwnd: int, keyword: str = "") -> None:
 
     img_h, img_w = img.shape[:2]
 
-    # ── 键盘切换按钮 ──
-    kb_target = None
+    # ── 检测是否已在输入模式 ──
+    input_mode_texts = ["发送", "按住说话", "可以描述", "请输入", "写留言"]
+    in_input_mode = False
+    for text in input_mode_texts:
+        center = find_text_center(img, text, confidence=0.30)
+        if center:
+            print(f"[WECHAT] 检测到输入模式特征「{text}」→ 已在输入模式")
+            in_input_mode = True
+            break
 
-    # playbook 优先
-    if keyword and img_w > 0:
-        kb_target = lookup_button(keyword, "keyboard_toggle", img_w, img_h)
-        if kb_target:
-            print(f"[WECHAT] Playbook 命中键盘切换按钮: {kb_target}")
+    # ── 键盘切换按钮（若不在输入模式）──
+    if not in_input_mode:
+        kb_target = None
 
-    if kb_target is None:
-        # 视觉定位右下角键盘/输入切换按钮（限制在窗口右下角 15% 区域）
-        roi_right = img[int(img_h * 0.75):, int(img_w * 0.82):]
-        kb_center = find_green_button(roi_right, min_area=80, max_area=5000)
-        if kb_center:
-            rx, ry = kb_center
-            kb_target = (int(img_w * 0.82) + rx, int(img_h * 0.75) + ry)
-            print(f"[WECHAT] 检测到输入切换按钮: 客户区{kb_target}")
-        else:
-            # 无绿色按钮 → 尝试 OCR 找「功能」「键盘」等
-            for kw in ("功能", "键盘", "输入", "表情"):
-                center = find_text_center(img, kw, confidence=0.35)
-                if center:
-                    kb_target = center
-                    print(f"[WECHAT] OCR 定位切换入口「{kw}」: {kb_target}")
-                    break
+        # playbook 优先
+        if keyword and img_w > 0:
+            kb_target = lookup_button(keyword, "keyboard_toggle", img_w, img_h)
+            if kb_target:
+                print(f"[WECHAT] Playbook 命中键盘切换按钮: {kb_target}")
 
-    if kb_target is not None:
+        if kb_target is None:
+            # 策略 A：模板匹配（键盘图标按钮）
+            kb_tpl_path = DEFAULT_TEMPLATE_DIR / "keyboard_toggle.png"
+            if kb_tpl_path.exists():
+                kb_center = find_template_center(img, kb_tpl_path, confidence=0.65)
+                if kb_center:
+                    kb_target = kb_center
+                    print(f"[WECHAT] 模板匹配定位键盘按钮: {kb_target}")
+
+            if kb_target is None:
+                # 策略 B：绿色小按钮（图标很小，降低 min_area）
+                y_start = int(img_h * 0.70)
+                x_start = int(img_w * 0.70)
+                roi_right = img[y_start:, x_start:]
+                kb_center = find_green_button(roi_right, min_area=30, max_area=5000)
+                if kb_center:
+                    rx, ry = kb_center
+                    kb_target = (x_start + rx, y_start + ry)
+                    print(f"[WECHAT] 颜色检测定位键盘按钮: {kb_target}")
+
+            if kb_target is None:
+                # 策略 C：OCR 宽泛搜索
+                for kw in ("键盘", "输入", "功能", "语音", "表情", "加号"):
+                    center = find_text_center(img, kw, confidence=0.25)
+                    if center:
+                        kb_target = center
+                        print(f"[WECHAT] OCR 定位切换入口「{kw}」: {kb_target}")
+                        break
+
+        if kb_target is None:
+            # 兜底：键盘图标总在窗口右下角
+            kb_target = (img_w - 45, img_h - 45)
+            print(f"[WECHAT] 使用兜底键盘按钮位置: {kb_target}")
+
+        # 点击键盘切换按钮
         _click_at(hwnd, kb_target[0], kb_target[1])
         time.sleep(1.5)
-        # 保存到 playbook
+
+        # 保存模板（用于后续模板匹配）+ playbook
         if keyword and img_w > 0:
             save_button(keyword, "keyboard_toggle", kb_target[0], kb_target[1], img_w, img_h)
-    else:
-        print("[WECHAT] 未检测到键盘切换按钮，假定已在输入模式")
+        # 自动采集键盘图标模板（首次通过非模板方式定位成功后）
+        kb_tpl_path = DEFAULT_TEMPLATE_DIR / "keyboard_toggle.png"
+        if not kb_tpl_path.exists():
+            try:
+                # 截取 40x40 区域作为模板
+                half = 20
+                x1 = max(0, kb_target[0] - half)
+                y1 = max(0, kb_target[1] - half)
+                x2 = min(img_w, kb_target[0] + half)
+                y2 = min(img_h, kb_target[1] + half)
+                tpl = img[y1:y2, x1:x2]
+                if tpl.size > 0:
+                    cv2.imwrite(str(kb_tpl_path), tpl)
+                    print(f"[WECHAT] 已自动采集键盘按钮模板: {kb_tpl_path} ({tpl.shape[1]}x{tpl.shape[0]})")
+            except Exception as e:
+                print(f"[WECHAT] 自动采集模板失败: {e}")
 
     # ── 输入框 ──
     input_target = None
@@ -1111,33 +1159,38 @@ def _goto_message_input(hwnd: int, keyword: str = "") -> None:
             raise RuntimeError("无法截取私信窗口（第二次）")
 
         img_h2, img_w2 = img2.shape[:2]
-        bottom_roi = img2[int(img_h2 * 0.7):, :]
+        bottom_roi = img2[int(img_h2 * 0.65):, :]
 
-        import cv2
-        import numpy as np
         gray = cv2.cvtColor(bottom_roi, cv2.COLOR_BGR2GRAY)
         _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        for cnt in sorted(contours, key=cv2.contourArea, reverse=True):
+        # 筛选可能的输入框：宽矩形 + 高度 > 30px（排除底部窄菜单栏误判）
+        candidates = []
+        for cnt in contours:
             x, y, bw, bh = cv2.boundingRect(cnt)
             aspect = bw / max(bh, 1)
-            if 2.0 <= aspect <= 20.0 and bw > img_w2 * 0.3:
-                input_target = (x + bw // 2, int(img_h2 * 0.7) + y + bh // 2)
-                print(f"[WECHAT] 检测到输入框: 客户区{input_target}, {bw}x{bh}, aspect={aspect:.1f}")
-                break
+            if 2.0 <= aspect <= 20.0 and bw > img_w2 * 0.3 and bh > 30:
+                area = bw * bh
+                candidates.append((area, x, y, bw, bh, aspect))
 
-        # 轮廓未命中 → OCR 兜底找「请输入」「按住说话」
-        if input_target is None:
-            for kw in ("请输入", "输入", "按住说话", "写留言"):
-                center = find_text_center(img2, kw, confidence=0.3)
+        if candidates:
+            # 选面积最大的
+            candidates.sort(key=lambda c: c[0], reverse=True)
+            _, x, y, bw, bh, aspect = candidates[0]
+            input_target = (x + bw // 2, int(img_h2 * 0.65) + y + bh // 2)
+            print(f"[WECHAT] 检测到输入框: 客户区{input_target}, {bw}x{bh}, aspect={aspect:.1f}")
+        else:
+            # OCR 兜底
+            for kw in ("发送", "可以描述", "请输入", "按住说话", "写留言"):
+                center = find_text_center(img2, kw, confidence=0.30)
                 if center:
                     input_target = center
                     print(f"[WECHAT] OCR 定位输入区域「{kw}」: {input_target}")
                     break
 
     if input_target is None:
-        raise RuntimeError("无法定位输入框：视觉检测未找到浅色矩形区域")
+        raise RuntimeError("无法定位输入框：视觉检测未找到有效输入区域")
 
     _click_at(hwnd, input_target[0], input_target[1])
     time.sleep(0.5)
