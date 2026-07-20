@@ -27,6 +27,23 @@ from .wechat_vision import (
     visualize_detection,
     DEFAULT_TEMPLATE_DIR,
 )
+from .wechat_verify import (
+    verify_search_results_visible,
+    verify_detail_window_opened,
+    verify_follow_success,
+    verify_chat_window_entered,
+    verify_input_box_visible,
+    verify_message_sent,
+)
+
+from .wechat_playbook import (
+    lookup_search_result,
+    save_search_result,
+    save_search_miss,
+    lookup_button,
+    save_button,
+    save_detail_window,
+)
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -639,9 +656,10 @@ def _navigate_to_first_result(hwnd: int) -> None:
 def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
     """在 Qt 微信搜索结果窗口中点击第一条结果，然后切换到新弹出的详情窗口。
 
-    视觉优先：
-      1. 先截图 + OCR 检测关键词位置（如「火眼审阅」）
-      2. 未找到则按固定第一条结果区域点击
+    策略（playbook 优先）：
+      0. 查 playbook 缓存 → 命中直接坐标点击（跳过截图+OCR）
+      1. 截图 + OCR 检测关键词位置
+      2. 固定第一条结果区域兜底
 
     注意：搜索覆盖层内嵌在主窗口上，禁止 re-foreground（会导致覆盖层关闭）。
     """
@@ -651,16 +669,27 @@ def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
     # ⚠ 绝不调 _ensure_foreground / SetForegroundWindow：
     #    Qt 微信的搜索结果是主窗口内的覆盖层，切前台会关掉覆盖层回到主界面
 
-    # 获取窗口客户区
+    target_point = None
+    used_playbook = False
+
+    # 获取窗口截图和尺寸（playbook + 视觉 都用到）
     img = capture_window(hwnd, client_only=True)
     if img is None or img.size == 0:
         print("[WECHAT] 截图失败，fallback 屏幕坐标")
         return _click_first_search_result_legacy(hwnd)
 
-    target_point = None
+    img_h, img_w = img.shape[:2]
 
-    # 1. OCR 找关键词（如果 keyword 非空）
+    # 策略 0：playbook 缓存
     if keyword:
+        cached = lookup_search_result(keyword, img_w, img_h)
+        if cached:
+            target_point = cached
+            used_playbook = True
+            print(f"[WECHAT] Playbook 命中搜索位置: {target_point}")
+
+    # 策略 1：OCR 找关键词
+    if target_point is None and keyword:
         try:
             target_point = find_text_center(img, keyword)
             if target_point:
@@ -668,17 +697,19 @@ def _click_first_search_result(hwnd: int, keyword: str = "") -> bool:
         except Exception as e:
             print(f"[WECHAT] OCR 失败，将使用固定位置: {e}")
 
-    # 2. 未命中则使用固定区域
+    # 策略 2：固定第一条区域
     if target_point is None:
-        h, w = img.shape[:2]
-        # 微信搜索第一条结果位于客户区上方约 150px 处，x 居中
-        target_point = (w // 2, 150)
+        target_point = (img_w // 2, 150)
         print(f"[WECHAT] 使用固定第一条结果位置: {target_point}")
+
+    # 保存到 playbook（仅视觉/OCR 定位成功时，避免缓存固定兜底坐标）
+    if keyword and not used_playbook and target_point != (img_w // 2, 150):
+        save_search_result(keyword, target_point[0], target_point[1], img_w, img_h)
 
     # 调试截图
     visualize_detection(img, target_point, save_path=Path("debug_search_result.png"))
 
-    # 点击目标位置（客户区坐标→屏幕坐标）
+    # 点击目标位置
     _click_at(hwnd, target_point[0], target_point[1])
     time.sleep(0.6)
     pyautogui.press('enter')
@@ -753,21 +784,43 @@ def _find_new_window_by_title(
     return None
 
 
-def _click_follow_in_detail_window(hwnd: int) -> None:
+def _click_follow_in_detail_window(hwnd: int, keyword: str = "") -> None:
     """在「服务号」详情窗口中点击「关注」按钮。
 
-    视觉优先：
-      1. 模板匹配 assets/wechat_templates/follow_button.png
-      2. 颜色检测（绿色按钮）
-      3. 失败时使用默认坐标兜底
+    策略（playbook 优先）：
+      0. 查 playbook 缓存 → 命中直接坐标点击（跳过视觉）
+      1. 视觉定位（模板匹配 → 颜色+OCR → 颜色检测）
+      2. 默认坐标兜底
+
+    Args:
+        keyword: 服务号关键词，用于 playbook 缓存键
     """
     import pyautogui
     time.sleep(2.0)
 
     _safe_ensure_foreground(hwnd)
-    target = _find_button_by_vision(hwnd, "follow_button.png", prefer_right=False)
+
+    # 获取客户区尺寸用于 playbook
+    img = capture_window(hwnd, client_only=True)
+    img_h, img_w = img.shape[:2] if img is not None else (0, 0)
+
+    target = None
+    used_playbook = False
+
+    # 策略 0：playbook 缓存
+    if keyword and img_w > 0:
+        cached = lookup_button(keyword, "follow", img_w, img_h)
+        if cached:
+            target = cached
+            used_playbook = True
+            print(f"[WECHAT] Playbook 命中关注按钮: {target}")
+
+    # 策略 1：视觉定位
     if target is None:
-        # 兜底：默认坐标
+        target = _find_button_by_vision(hwnd, "follow_button.png", prefer_right=False)
+
+    if target is None:
+        # 兜底：默认坐标（屏幕坐标）
         r = wintypes.RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(r))
         cx = r.left + 200
@@ -777,7 +830,11 @@ def _click_follow_in_detail_window(hwnd: int) -> None:
     else:
         cx, cy = target
         sx, sy = _window_client_to_screen(hwnd, cx, cy)
-        print(f"[WECHAT] 视觉定位关注按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+        print(f"[WECHAT] 定位关注按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+
+        # 保存到 playbook（视觉定位成功时）
+        if keyword and not used_playbook and img_w > 0:
+            save_button(keyword, "follow", cx, cy, img_w, img_h)
 
     pyautogui.moveTo(sx, sy, duration=0.15)
     pyautogui.click(sx, sy)
@@ -797,19 +854,41 @@ def _click_follow_in_detail_window(hwnd: int) -> None:
             print("[WECHAT] 关注重试仍有问题，继续流程（可能已关注）")
 
 
-def _click_send_msg_in_detail_window(hwnd: int) -> None:
+def _click_send_msg_in_detail_window(hwnd: int, keyword: str = "") -> None:
     """关注成功后，在详情窗口中点击「私信」按钮。
 
-    视觉优先：
-      1. 模板匹配 assets/wechat_templates/send_msg_button.png
-      2. 颜色检测（绿色按钮）
-      3. 失败时使用默认坐标兜底
+    策略（playbook 优先）：
+      0. 查 playbook 缓存 → 命中直接坐标点击（跳过视觉）
+      1. 视觉定位（模板匹配 → 颜色+OCR → 颜色检测）
+      2. 默认坐标兜底
+
+    Args:
+        keyword: 服务号关键词，用于 playbook 缓存键
     """
     import pyautogui
     time.sleep(1.5)
 
     _safe_ensure_foreground(hwnd)
-    target = _find_button_by_vision(hwnd, "send_msg_button.png", prefer_right=True)
+
+    # 获取客户区尺寸
+    img = capture_window(hwnd, client_only=True)
+    img_h, img_w = img.shape[:2] if img is not None else (0, 0)
+
+    target = None
+    used_playbook = False
+
+    # 策略 0：playbook 缓存
+    if keyword and img_w > 0:
+        cached = lookup_button(keyword, "send_msg", img_w, img_h)
+        if cached:
+            target = cached
+            used_playbook = True
+            print(f"[WECHAT] Playbook 命中私信按钮: {target}")
+
+    # 策略 1：视觉定位
+    if target is None:
+        target = _find_button_by_vision(hwnd, "send_msg_button.png", prefer_right=True)
+
     if target is None:
         # 兜底：默认坐标
         r = wintypes.RECT()
@@ -821,7 +900,11 @@ def _click_send_msg_in_detail_window(hwnd: int) -> None:
     else:
         cx, cy = target
         sx, sy = _window_client_to_screen(hwnd, cx, cy)
-        print(f"[WECHAT] 视觉定位私信按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+        print(f"[WECHAT] 定位私信按钮: 客户区({cx}, {cy}), 屏幕({sx}, {sy})")
+
+        # 保存到 playbook
+        if keyword and not used_playbook and img_w > 0:
+            save_button(keyword, "send_msg", cx, cy, img_w, img_h)
 
     pyautogui.moveTo(sx, sy, duration=0.15)
     pyautogui.click(sx, sy)
@@ -1005,25 +1088,30 @@ async def wechat_search_and_follow(
 ) -> str:
     """搜索公众号/服务号 → 关注 → 发私信（pyautogui 物理键盘方案）
 
-    流程分 4 步，每步有独立等待和状态检查：
-      1. 打开搜索 + 输入关键词 + 回车
-      2. 在搜索结果中导航到第一条 → 进入详情页
-      3. 关注
-      4. 如有 message 则发送私信
+    流程 5 步，每步操作后均进行视觉验证，失败立即返回明确错误：
+      1. 打开搜索 → 输入关键词 → 验证搜索结果出现
+      2. 点击第一条结果 → 验证详情窗口打开
+      3. 点击关注 → 验证关注成功
+      4. 点击发消息 → 验证进入聊天窗口
+      5. 输入并发送消息 → 验证消息出现在聊天记录
     """
     import pyautogui
     try:
         hwnd = _get_wechat_hwnd()
         if hwnd is None:
-            return "微信未登录，请扫码登录后重试"
+            return "❌ 微信未登录，请扫码登录后重试"
 
-        # ── Step 1: 打开搜索 → 输入 → 回车 ──
+        # ── Step 1: 打开搜索 → 输入 → 回车 → 验证 ──
         print(f"[WECHAT-STEP1] 搜索关键词: {keyword}")
         _open_search(hwnd)
         _search_keyword(hwnd, keyword)
         print(f"[WECHAT-STEP1] 搜索已提交")
 
-        # ── Step 2: 在搜索结果窗口中点击第一条结果 ──
+        ok, detail = verify_search_results_visible(hwnd, keyword)
+        if not ok:
+            return f"❌ 搜索「{keyword}」后未能检测到搜索结果。原因: {detail}"
+
+        # ── Step 2: 点击第一条结果 → 检测详情窗口 → 验证 ──
         print(f"[WECHAT-STEP2] 等待搜索结果窗口渲染...")
         _click_first_search_result(hwnd, keyword=keyword)
         print("[WECHAT-STEP2] 已点击第一条结果，等待新窗口弹出...")
@@ -1042,27 +1130,33 @@ async def wechat_search_and_follow(
             detail_hwnd = hwnd  # 继续用原窗口
         else:
             print(f"[WECHAT-STEP2] 检测到详情窗口: hwnd={detail_hwnd}")
-            # 切换到新窗口前台
             _ensure_foreground(detail_hwnd)
             time.sleep(0.5)
 
-        # ── Step 3: 在详情窗口中点击「关注」按钮 ──
+        ok, detail = verify_detail_window_opened(detail_hwnd, keyword=keyword)
+        if not ok:
+            return f"❌ 点击搜索结果后未能进入「{keyword}」详情页。原因: {detail}"
+
+        # ── Step 3: 点击关注 → 验证 ──
         print("[WECHAT-STEP3] 在详情窗口中点击关注按钮...")
-        _click_follow_in_detail_window(detail_hwnd)
-        print("[WECHAT-STEP3] 关注操作已执行")
+        _click_follow_in_detail_window(detail_hwnd, keyword=keyword)
 
-        result = f"搜索「{keyword}」并尝试关注完成"
+        ok, detail = verify_follow_success(detail_hwnd)
+        if not ok:
+            return f"❌ 关注「{keyword}」可能失败：点击后未检测到「已关注/发消息/私信」。原因: {detail}。请手动检查。"
+        print("[WECHAT-STEP3] 关注操作已验证成功")
 
-        # ── Step 4: 在详情窗口中点击「发消息」进入聊天 ──
+        result = f"✅ 搜索「{keyword}」并关注完成"
+
+        # ── Step 4: 点击发消息 → 验证进入聊天 ──
         if message:
             print(f"[WECHAT-STEP4] 点击发消息按钮: {message[:30]}...")
-            _click_send_msg_in_detail_window(detail_hwnd)
+            _click_send_msg_in_detail_window(detail_hwnd, keyword=keyword)
             time.sleep(1.5)
 
             # 发消息按钮点击后，聊天窗口可能在原窗口或新窗口
-            # 先尝试在新窗口中找输入框
             chat_hwnd = _find_new_window_by_title(
-                keyword="火眼审阅",
+                keyword=keyword,
                 exclude_hwnd=hwnd,
                 min_w=400,
                 min_h=400,
@@ -1075,9 +1169,24 @@ async def wechat_search_and_follow(
                 _ensure_foreground(chat_hwnd)
                 time.sleep(0.5)
 
+            ok, detail = verify_chat_window_entered(chat_hwnd)
+            if not ok:
+                return f"❌ 点击「私信」后未能进入聊天窗口。原因: {detail}"
+
+            # ── Step 5: 输入并发送消息 → 验证 ──
             _goto_message_input(chat_hwnd)
+
+            ok, detail = verify_input_box_visible(chat_hwnd)
+            if not ok:
+                return f"❌ 聊天窗口中未找到输入框。原因: {detail}"
+
             _send_message(chat_hwnd, message)
-            print("[WECHAT-STEP4] 消息已发送")
+            print("[WECHAT-STEP5] 消息已发送，验证中...")
+
+            ok, detail = verify_message_sent(chat_hwnd, message)
+            if not ok:
+                return f"⚠️ 消息可能未成功发送（未在聊天记录中检测到）。原因: {detail}"
+
             result += "，已发送私信"
 
         return result
@@ -1085,7 +1194,7 @@ async def wechat_search_and_follow(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return f"微信操作失败: {e}"
+        return f"❌ 微信操作异常: {e}"
 
 
 async def wechat_send_message(
