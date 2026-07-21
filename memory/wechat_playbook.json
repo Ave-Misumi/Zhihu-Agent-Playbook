@@ -6,7 +6,7 @@
     },
     "client_w": 1320,
     "client_h": 960,
-    "updated": "2026-07-22T00:31:55",
+    "updated": "2026-07-22T00:51:54",
     "follow": {
       "x_pct": 0.3432,
       "y_pct": 0.1875
@@ -16,8 +16,8 @@
       "y_pct": 0.1875
     },
     "keyboard_toggle": {
-      "x_pct": 0.8045,
-      "y_pct": 0.951
+      "x_pct": 0.8038,
+      "y_pct": 0.95
     },
     "input_box": {
       "x_pct": 0.4,

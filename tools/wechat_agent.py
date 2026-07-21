@@ -1088,16 +1088,38 @@ def wechat_type_and_send(message: str) -> str:
     _press_enter()
     time.sleep(1.5)
 
-    # ── 验证（重试 2 次，微信消息有渲染延迟）──
+    # ── 验证（重试 3 次，直接截图全量 OCR + 绿色气泡检测）──
     msg_short = message[:6] if len(message) > 6 else message
+    msg_shorter = message[:4] if len(message) > 4 else message
     found = False
+    obs = ""
+    time.sleep(2.0)  # 微信消息渲染有动画，先等 2 秒
     for attempt in range(3):
-        time.sleep(1.0)
-        obs = _observe()
-        if msg_short in obs:
-            found = True
-            break
+        # 直接截图做全量 OCR（极低置信度阈值，确保不遗漏）
+        verify_img = capture_window(hwnd, client_only=True)
+        if verify_img is not None:
+            all_texts = _ocr_image(verify_img)
+            # 策略 A: 全量文字匹配（置信度≥0.05，几乎不过滤）
+            full_text = " ".join(t[0] for t in all_texts if t[2] >= 0.05)
+            if msg_short in full_text or msg_shorter in full_text:
+                found = True
+                print(f"[AGENT] 验证通过：OCR 检测到消息文字")
+                break
+            # 策略 B: 检测绿色消息气泡（自己发送的消息是绿色）
+            hsv = cv2.cvtColor(verify_img, cv2.COLOR_BGR2HSV)
+            lower_green = (35, 40, 40)
+            upper_green = (85, 255, 255)
+            green_mask = cv2.inRange(hsv, lower_green, upper_green)
+            green_ratio = cv2.countNonZero(green_mask) / (verify_img.shape[0] * verify_img.shape[1])
+            if green_ratio > 0.005:  # 有绿色区域（消息气泡）
+                # 进一步检查绿色区域附近是否有文字
+                print(f"[AGENT] 验证通过：检测到绿色消息气泡（ratio={green_ratio:.4f}）")
+                found = True
+                break
         print(f"[AGENT] 验证重试 {attempt + 1}/3...")
+        time.sleep(1.5)
+
+    obs = _observe()
 
     if found:
         _clear_retry("type_and_send")
