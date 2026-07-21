@@ -49,55 +49,12 @@ from .wechat_vision import (
 user32 = ctypes.windll.user32
 user32.SetProcessDPIAware()
 
-# 窗口查找
+# 窗口查找 —— 直接复用 wechat.py 里完整的登录辅助逻辑
+# （二维码扫码提示、绿色登录按钮点击、手机确认弹窗等待 等全部场景都已覆盖）
 def _find_wechat_hwnd() -> int | None:
-    """查找微信主窗口 hwnd（>=500×400、有标题、非TrayIcon）。"""
-    pids = []
-    for name in ("WeChat.exe", "Weixin.exe"):
-        try:
-            out = _subprocess.check_output(
-                f'tasklist /FI "IMAGENAME eq {name}" /FO CSV /NH',
-                shell=True, text=True
-            )
-            for line in out.strip().split('\n'):
-                if name in line:
-                    parts = line.replace('"', '').split(',')
-                    if len(parts) >= 2:
-                        try:
-                            pids.append(int(parts[1].strip()))
-                        except ValueError:
-                            pass
-        except Exception:
-            pass
-
-    candidates = []
-
-    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-    @WNDENUMPROC
-    def _enum(hwnd, _lp):
-        wp = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
-        if wp.value not in pids:
-            return True
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        r = wintypes.RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(r))
-        ww, hh = r.right - r.left, r.bottom - r.top
-        if ww < 500 or hh < 400:
-            return True
-        cls_buf = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(hwnd, cls_buf, 256)
-        if "TrayIcon" in cls_buf.value:
-            return True
-        candidates.append((hwnd, ww * hh))
-        return True
-
-    user32.EnumWindows(_enum, 0)
-    if candidates:
-        candidates.sort(key=lambda c: -c[1])
-        return candidates[0][0]
-    return None
+    """复用旧版 _get_wechat_hwnd 的完整登录逻辑。"""
+    from .wechat import _get_wechat_hwnd
+    return _get_wechat_hwnd()
 
 
 # ═══════════════════════════════════════════
