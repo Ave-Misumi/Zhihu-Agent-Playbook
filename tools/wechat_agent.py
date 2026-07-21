@@ -907,27 +907,30 @@ def wechat_type_and_send(message: str) -> str:
     )
     if not has_input:
         print("[AGENT] 未检测到输入框，点击右下角键盘图标...")
-        # Playbook 优先
         kb_clicked = False
+        kb_x, kb_y = None, None
+
+        # ── 策略 0: Playbook 缓存（最优先，复用上次成功位置）──
         if _HAS_PLAYBOOK and _LAST_KEYWORD:
             cached = lookup_button(_LAST_KEYWORD, "keyboard_toggle", img_w, img_h)
             if cached:
-                sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
-                pyautogui.click(sx, sy)
-                time.sleep(0.8)
-                # 验证：重截图看输入框是否出现
-                img_check = capture_window(hwnd, client_only=True)
-                if img_check is not None:
-                    bottom_text = " ".join(t[0] for t in _ocr_image(img_check[int(img_check.shape[0] * 0.7):, :]) if t[2] >= 0.15)
-                    if any(kw in bottom_text for kw in ["发送", "可以描述", "输入", "按住"]):
-                        kb_clicked = True
-                        print(f"[AGENT] 从缓存点击键盘图标 → 输入框已出现")
-                        img = img_check
-                        img_h, img_w = img.shape[:2]
-        if not kb_clicked:
-            # 视觉定位键盘图标：右下角小图标（通常 30-50px，灰色/浅色）
-            kb_x, kb_y = None, None
-            # 策略 1: OCR 找"键盘"或"切换"
+                kb_x, kb_y = cached[0], cached[1]
+                print(f"[AGENT] Playbook 缓存键盘图标: ({kb_x}, {kb_y})")
+
+        # ── 策略 1: 模板匹配 keyboard_toggle.png ──
+        if kb_x is None:
+            template_path = Path(__file__).parent.parent / "assets" / "wechat_templates" / "keyboard_toggle.png"
+            if template_path.exists():
+                from .wechat_vision import find_template_center
+                center = find_template_center(img, str(template_path), confidence=0.65)
+                if center:
+                    kb_x, kb_y = center
+                    print(f"[AGENT] 模板匹配定位键盘图标: ({kb_x}, {kb_y})")
+            else:
+                print(f"[AGENT] 模板文件不存在: {template_path}")
+
+        # ── 策略 2: OCR 找"键盘"或"切换" ──
+        if kb_x is None:
             roi_corner = img[img_h - 120:img_h, img_w - 180:img_w]
             corner_texts = _ocr_image(roi_corner)
             for t, bbox, c in corner_texts:
@@ -938,32 +941,42 @@ def wechat_type_and_send(message: str) -> str:
                     kb_y = img_h - 120 + int(sum(ys) / len(ys))
                     print(f"[AGENT] OCR 定位键盘图标: 「{t}」 at ({kb_x}, {kb_y})")
                     break
-            # 策略 2: 右下角找小图标颜色块（图标通常偏暗灰色）
-            if kb_x is None:
-                roi_corner = img[img_h - 100:img_h, img_w - 100:img_w]
-                gray = cv2.cvtColor(roi_corner, cv2.COLOR_BGR2GRAY)
-                # 找 20-50px 的暗色连通区域
-                _, thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
-                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                for ct in contours:
-                    xc, yc, wc, hc = cv2.boundingRect(ct)
-                    if 15 <= wc <= 60 and 15 <= hc <= 60 and wc * hc >= 200:
-                        kb_x = img_w - 100 + xc + wc // 2
-                        kb_y = img_h - 100 + yc + hc // 2
-                        print(f"[AGENT] 轮廓定位键盘图标: area={wc*hc}, at ({kb_x}, {kb_y})")
-                        break
-            if kb_x is not None:
-                sx, sy = _window_client_to_screen(hwnd, kb_x, kb_y)
-                pyautogui.click(sx, sy)
-                time.sleep(0.5)
-                kb_clicked = True
-                # 保存到 Playbook
-                if _HAS_PLAYBOOK and _LAST_KEYWORD:
-                    save_button(_LAST_KEYWORD, "keyboard_toggle", kb_x, kb_y, img_w, img_h)
-        # 重截图
-        if kb_clicked:
-            img = capture_window(hwnd, client_only=True)
-            img_h, img_w = img.shape[:2]
+
+        # ── 策略 3: 右下角轮廓检测 ──
+        if kb_x is None:
+            roi_corner = img[img_h - 100:img_h, img_w - 100:img_w]
+            gray = cv2.cvtColor(roi_corner, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for ct in contours:
+                xc, yc, wc, hc = cv2.boundingRect(ct)
+                if 15 <= wc <= 60 and 15 <= hc <= 60 and wc * hc >= 200:
+                    kb_x = img_w - 100 + xc + wc // 2
+                    kb_y = img_h - 100 + yc + hc // 2
+                    print(f"[AGENT] 轮廓定位键盘图标: area={wc*hc}, at ({kb_x}, {kb_y})")
+                    break
+
+        # ── 执行点击 ──
+        if kb_x is not None:
+            sx, sy = _window_client_to_screen(hwnd, kb_x, kb_y)
+            pyautogui.click(sx, sy)
+            time.sleep(0.8)
+            kb_clicked = True
+            # 保存到 Playbook
+            if _HAS_PLAYBOOK and _LAST_KEYWORD:
+                save_button(_LAST_KEYWORD, "keyboard_toggle", kb_x, kb_y, img_w, img_h)
+            # 验证：重截图看输入框是否出现
+            img_check = capture_window(hwnd, client_only=True)
+            if img_check is not None:
+                bottom_text = " ".join(t[0] for t in _ocr_image(img_check[int(img_check.shape[0] * 0.7):, :]) if t[2] >= 0.15)
+                if any(kw in bottom_text for kw in ["发送", "可以描述", "输入", "按住"]):
+                    print(f"[AGENT] 键盘图标点击后输入框已出现")
+                    img = img_check
+                    img_h, img_w = img.shape[:2]
+                else:
+                    print(f"[AGENT] 键盘图标点击后输入框仍未出现，继续定位输入框...")
+                    img = img_check
+                    img_h, img_w = img.shape[:2]
         else:
             # 全部失败 → 人工辅助
             print("[AGENT] 键盘图标视觉定位失败，请求人工辅助...")
@@ -995,12 +1008,38 @@ def wechat_type_and_send(message: str) -> str:
             input_found = True
             print(f"[AGENT] 从缓存定位输入框: ({input_cx}, {input_cy})")
 
-    # 策略1: OCR 找"发送"按钮，输入框在左边
+    # 策略1: 检测底部白色矩形输入框（微信输入框通常是白色圆角矩形，占底部大部分宽度）
+    if not input_found:
+        gray = cv2.cvtColor(roi_bottom, cv2.COLOR_BGR2GRAY)
+        # 二值化：找亮色区域（输入框背景）
+        _, bright = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(bright, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best_rect = None
+        best_area = 0
+        for ct in contours:
+            x, y, w, h = cv2.boundingRect(ct)
+            area = w * h
+            # 输入框特征：宽度占大部分、高度适中、在底部区域
+            if w > img_w * 0.5 and 40 < h < 150 and area > best_area:
+                best_area = area
+                best_rect = (x, y, w, h)
+        if best_rect:
+            x, y, w, h = best_rect
+            input_cx = x + w // 2
+            input_cy = int(img_h * 0.65) + y + h // 2
+            sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
+            print(f"[AGENT] 通过白色矩形定位输入框: ({input_cx}, {input_cy}), size={w}x{h}")
+            pyautogui.moveTo(sx, sy, duration=0.1)
+            pyautogui.click(sx, sy)
+            input_found = True
+
+    # 策略2: OCR 找"发送"按钮，输入框在按钮左侧
     if not input_found:
         send_center = find_text_center(roi_bottom, "发送", confidence=0.25)
         if send_center:
             sx_btn, sy_btn = send_center
-            input_cx = max(50, sx_btn - 150)
+            # 输入框在发送按钮左侧大面积区域，取左侧 40% 中央
+            input_cx = int(img_w * 0.4)
             input_cy = int(img_h * 0.65) + sy_btn
             sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
             print(f"[AGENT] 通过「发送」按钮定位输入框: ({input_cx}, {input_cy})")
@@ -1008,7 +1047,7 @@ def wechat_type_and_send(message: str) -> str:
             pyautogui.click(sx, sy)
             input_found = True
 
-    # 策略2: 找输入框提示文字
+    # 策略3: 找输入框提示文字
     if not input_found:
         for kw in ["可以描述", "描述任务", "输入"]:
             tip_center = find_text_center(roi_bottom, kw, confidence=0.2)
@@ -1022,7 +1061,7 @@ def wechat_type_and_send(message: str) -> str:
                 input_found = True
                 break
 
-    # 策略3: 所有 OCR 策略都失败 → 人工辅助
+    # 策略4: 所有 OCR/视觉策略都失败 → 人工辅助
     if not input_found:
         print("[AGENT] 视觉定位输入框失败，请求人工辅助...")
         kw = _LAST_KEYWORD if _LAST_KEYWORD else "unknown"
@@ -1049,10 +1088,16 @@ def wechat_type_and_send(message: str) -> str:
     _press_enter()
     time.sleep(1.5)
 
-    # ── 验证 ──
-    obs = _observe()
+    # ── 验证（重试 2 次，微信消息有渲染延迟）──
     msg_short = message[:6] if len(message) > 6 else message
-    found = msg_short in obs
+    found = False
+    for attempt in range(3):
+        time.sleep(1.0)
+        obs = _observe()
+        if msg_short in obs:
+            found = True
+            break
+        print(f"[AGENT] 验证重试 {attempt + 1}/3...")
 
     if found:
         _clear_retry("type_and_send")
