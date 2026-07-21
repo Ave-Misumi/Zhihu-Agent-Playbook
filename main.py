@@ -75,18 +75,49 @@ async def run_wps(user_task: str):
 
 async def run_wechat(user_task: str):
     from agent.core import create_wechat_agent
-    print(f"==> 微信模式 | LangChain ReAct Agent | 你说: {user_task}")
+    print(f"\n{'='*60}")
+    print(f"==> 微信模式 | LangChain ReAct Agent")
+    print(f"==> 你说: {user_task}")
+    print(f"{'='*60}\n")
+
     agent_graph, task = await create_wechat_agent(user_task)
-    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
-    # 提取最后一条 AI 消息作为结果
-    output = "无输出"
-    if "messages" in result:
-        for msg in reversed(result["messages"]):
-            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
-                output = msg.content
-                break
-    print(f"==> 完成！\n{output}")
-    return result
+
+    step = 0
+    async for chunk in agent_graph.astream(
+        {"messages": [{"role": "user", "content": task}]},
+        stream_mode="updates",
+    ):
+        step += 1
+        for node_name, node_output in chunk.items():
+            msgs = node_output.get("messages", [])
+            for msg in msgs:
+                if hasattr(msg, "content") and msg.content:
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        # LLM 决定调用工具
+                        for tc in msg.tool_calls:
+                            print(f"\\n{'─'*50}")
+                            print(f"[Step {step}] LLM → {tc['name']}")
+                            args_str = ", ".join(f"{k}={repr(v)[:80]}" for k, v in tc.get("args", {}).items())
+                            print(f"        参数: {args_str}")
+                            print(f"{'─'*50}") 
+                    elif hasattr(msg, "type") and msg.type == "tool":
+                        # 工具返回结果
+                        content = str(msg.content)
+                        # 截断过长的 OCR dump
+                        if len(content) > 600:
+                            content = content[:600] + "\n... (截断)"
+                        print(f"        返回: {content}")
+                    else:
+                        # LLM 文本输出
+                        print(f"\\n{'─'*50}")
+                        print(f"[Step {step}] LLM 思考:")
+                        print(f"{msg.content}")
+                        print(f"{'─'*50}")
+
+    print(f"\\n{'='*60}")
+    print(f"==> Agent 执行完毕")
+    print(f"==> 共 {step} 步")
+    print(f"{'='*60}\n")
 
 
 async def main():

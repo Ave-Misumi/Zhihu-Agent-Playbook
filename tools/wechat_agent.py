@@ -62,30 +62,126 @@ def _find_wechat_hwnd() -> int | None:
 # ═══════════════════════════════════════════
 
 _CACHED_HWND: int | None = None
+_ACTIVE_HWND: int | None = None  # 当前操作窗口（可能是主窗口，也可能是弹出的详情/聊天窗口）
 
 
 def _get_hwnd() -> int | None:
-    global _CACHED_HWND
+    """获取当前操作窗口。首次调用=登录/启动。"""
+    global _CACHED_HWND, _ACTIVE_HWND
+    if _ACTIVE_HWND:
+        try:
+            if user32.IsWindow(_ACTIVE_HWND):
+                return _ACTIVE_HWND
+        except Exception:
+            pass
+        _ACTIVE_HWND = None
+    # 回退到主窗口
     if _CACHED_HWND:
         try:
             if user32.IsWindow(_CACHED_HWND):
+                _ACTIVE_HWND = _CACHED_HWND
                 return _CACHED_HWND
         except Exception:
             pass
+        _CACHED_HWND = None
     hwnd = _find_wechat_hwnd()
     if hwnd:
         _CACHED_HWND = hwnd
+        _ACTIVE_HWND = hwnd
     return hwnd
 
 
 def _refresh_hwnd() -> int | None:
-    """强制重新查找窗口（搜索弹出新窗口后使用）。"""
-    global _CACHED_HWND
+    """搜索/点击弹出新窗口后，检测并切换到新窗口。
+    如果没找到新窗口，保持当前 _ACTIVE_HWND 不变。"""
+    global _CACHED_HWND, _ACTIVE_HWND
     time.sleep(1.0)
-    hwnd = _find_wechat_hwnd()
-    if hwnd:
-        _CACHED_HWND = hwnd
-    return hwnd
+    new_hwnd = _find_detail_window(old_hwnd=_CACHED_HWND, timeout=3)
+    if new_hwnd:
+        print(f"[WECHAT-AGENT] 检测到新窗口: hwnd={new_hwnd}")
+        _ACTIVE_HWND = new_hwnd
+        _ensure_foreground(new_hwnd)
+        return new_hwnd
+    # 没找到新窗口 → 保持当前窗口不变
+    if _ACTIVE_HWND and user32.IsWindow(_ACTIVE_HWND):
+        print(f"[WECHAT-AGENT] 无新窗口，继续操作当前窗口: hwnd={_ACTIVE_HWND}")
+        return _ACTIVE_HWND
+    # 连当前窗口都没了 → 回主窗口
+    if _CACHED_HWND and user32.IsWindow(_CACHED_HWND):
+        _ACTIVE_HWND = _CACHED_HWND
+        _ensure_foreground(_CACHED_HWND)
+    return _ACTIVE_HWND
+
+
+def _find_detail_window(old_hwnd: int = 0, timeout: int = 3) -> int | None:
+    """查找独立弹出的微信详情/聊天窗口。
+    微信 Qt 版点击搜索结果后可能弹出独立窗口，标题含「服务号」或 class 为 WeChatMainWndForPC。
+    排除 old_hwnd（主窗口）。"""
+    import subprocess as _sp
+    # 获取微信进程 PID
+    pids = []
+    for name in ("WeChat.exe", "Weixin.exe"):
+        try:
+            out = _sp.check_output(
+                f'tasklist /FI "IMAGENAME eq {name}" /FO CSV /NH',
+                shell=True, text=True
+            )
+            for line in out.strip().split('\n'):
+                if name in line:
+                    try:
+                        pids.append(int(line.replace('"', '').split(',')[1].strip()))
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+    start = time.time()
+    while time.time() - start < timeout:
+        found = []
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        @WNDENUMPROC
+        def _enum(hwnd, _lp):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            if hwnd == old_hwnd:
+                return True
+            r = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(r))
+            ww = r.right - r.left
+            hh = r.bottom - r.top
+            if ww < 300 or hh < 300:
+                return True
+            # 检查是否属于微信进程
+            wp = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(wp))
+            if pids and wp.value not in pids:
+                return True
+            cls_buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, cls_buf, 256)
+            title_buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title_buf, 256)
+            title = title_buf.value
+            cls = cls_buf.value
+            # 匹配：标题含「服务号」或 class 是 WeChatMainWndForPC
+            if "服务号" in title or "公众号" in title or cls == "WeChatMainWndForPC":
+                found.append((hwnd, ww * hh))
+            return True
+
+        user32.EnumWindows(_enum, 0)
+        if found:
+            found.sort(key=lambda c: -c[1])
+            return found[0][0]
+        time.sleep(0.5)
+    return None
+
+
+def _reset_to_main():
+    """返回主窗口（如按 Esc 返回后）。"""
+    global _ACTIVE_HWND
+    if _CACHED_HWND:
+        _ACTIVE_HWND = _CACHED_HWND
+        _ensure_foreground(_CACHED_HWND)
+    return _ACTIVE_HWND
 
 
 def _ensure_foreground(hwnd: int):
@@ -168,8 +264,7 @@ def _observe() -> str:
         return "【状态】❌ 截图为空"
 
     img_h, img_w = img.shape[:2]
-    _ensure_foreground(hwnd)
-    time.sleep(0.3)
+    # 不拉前台 —— _observe() 是只读操作，窗口状态由前置动作管理
 
     # OCR 全部文字
     ocr_results = _ocr_image(img)
@@ -286,7 +381,7 @@ def _press_escape():
 
 
 # ═══════════════════════════════════════════
-# 工具函数（给 Agent 调用的原子操作）
+# 工具函数（给 Agent 调用）
 # ═══════════════════════════════════════════
 
 def wechat_observe() -> str:
@@ -345,7 +440,7 @@ def wechat_click_first_result() -> str:
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
-    _ensure_foreground(hwnd)
+    # 不拉前台：搜索结果在浮层中，拉主窗口会盖住它
 
     # 截图 + OCR 找到第一条结果的位置
     img = capture_window(hwnd, client_only=True)
@@ -421,8 +516,8 @@ def wechat_click_button(target: str) -> str:
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
-    _ensure_foreground(hwnd)
-    time.sleep(0.3)
+    # 不拉前台！PrintWindow 后台截图 + pyautogui 屏幕坐标点击都不需要窗口在前台
+    # 拉前台反而会把主窗口盖到弹出窗口上面
 
     img = capture_window(hwnd, client_only=True)
     if img is None:
@@ -526,8 +621,7 @@ def wechat_type_and_send(message: str) -> str:
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
-    _ensure_foreground(hwnd)
-    time.sleep(0.3)
+    # 不拉前台：PrintWindow 后台截图 + pyautogui 屏幕坐标点击都不需要窗口在前台
 
     img = capture_window(hwnd, client_only=True)
     if img is None:
