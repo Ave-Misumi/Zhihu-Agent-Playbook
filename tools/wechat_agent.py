@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pyautogui
 import numpy as np
+import cv2
 
 from .wechat_vision import (
     capture_window, _ocr_image, find_text_center,
@@ -101,17 +102,11 @@ def _clear_retry(step_name: str):
 def _request_human_assist(action_label: str, hwnd: int, keyword: str) -> tuple[int, int] | None:
     """三次自动定位失败后，请求人工辅助点击并记录坐标到 Playbook。
 
-    流程:
-      1. 打印显眼提示，让用户手动点击目标位置
-      2. 监听鼠标点击事件，捕获屏幕坐标
-      3. 将坐标转为客户区坐标
-      4. 保存到 Playbook 供后续复用
+    使用轮询 GetAsyncKeyState 检测左键按下（避免 64 位钩子溢出），
+    点击后的屏幕坐标会转为客户区坐标并保存到 Playbook。
 
-    返回 (client_x, client_y) 或 None（用户取消）。
+    返回 (client_x, client_y) 或 None（用户取消/超时）。
     """
-    import threading
-
-    # 获取窗口屏幕位置用于坐标转换
     rect = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(rect))
     win_x, win_y = rect.left, rect.top
@@ -119,99 +114,47 @@ def _request_human_assist(action_label: str, hwnd: int, keyword: str) -> tuple[i
     print("\n" + "=" * 60)
     print(f"🤚 【人工辅助】自动定位「{action_label}」失败 3 次")
     print(f"   请手动点击目标位置，或按 Ctrl+C 跳过...")
+    print(f"   （在 60 秒内点击窗口内目标按钮即可）")
     print(f"=" * 60)
 
-    click_result: list[tuple[int, int] | None] = [None]
-    stop_event = threading.Event()
+    # 等待左键松开（避免捕获当前按下的键）
+    while ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000:
+        time.sleep(0.05)
+    time.sleep(0.3)
 
-    def mouse_listener():
-        """监听下一次鼠标左键按下，记录屏幕坐标"""
-        import ctypes.wintypes as w32
-        user32_lib = ctypes.windll.user32
-        WH_MOUSE_LL = 14
-        WM_LBUTTONDOWN = 0x0201
+    deadline = time.time() + 60.0
+    while time.time() < deadline:
+        if ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000:
+            pt = wintypes.POINT()
+            ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+            sx, sy = pt.x, pt.y
+            # 防抖：等按键松开
+            time.sleep(0.3)
 
-        hook_id = None
-        def low_level_mouse_proc(nCode, wParam, lParam):
-            if nCode >= 0 and wParam == WM_LBUTTONDOWN:
-                # lParam 指向 MSLLHOOKSTRUCT: pt(8 bytes) + mouseData(4) + flags(4) + time(4) + dwExtraInfo(8)
-                x = ctypes.c_long.from_address(lParam + 4).value  # pt.x
-                y = ctypes.c_long.from_address(lParam + 8).value  # pt.y
-                # MSLLHOOKSTRUCT pt 是 POINT (8 bytes), after that:
-                x = ctypes.c_long.from_address(lParam).value
-                y = ctypes.c_long.from_address(lParam + 4).value
-                click_result[0] = (x, y)
-                stop_event.set()
-                user32_lib.UnhookWindowsHookEx(hook_id)
-                return 0
-            return user32_lib.CallNextHookEx(hook_id, nCode, wParam, lParam)
+            # 转为客户区坐标
+            client_x = sx - win_x
+            client_y = sy - win_y - 30
+            if client_y < 0:
+                client_y = 0
 
-        CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_int, ctypes.c_longlong, ctypes.c_longlong)
-        hook_proc = CMPFUNC(low_level_mouse_proc)
-        hook_id = user32_lib.SetWindowsHookExW(WH_MOUSE_LL, hook_proc, None, 0)
+            print(f"✅ 人工点击位置: 屏幕({sx}, {sy}) → 客户区({client_x}, {client_y})")
 
-        if not hook_id:
-            print("[WARN] 无法安装鼠标钩子，回退到轮询模式...")
-            # 轮询模式：检测鼠标按键
-            while not stop_event.is_set():
-                if ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000:
-                    pt = wintypes.POINT()
-                    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-                    click_result[0] = (pt.x, pt.y)
-                    time.sleep(0.3)  # 防抖
-                    stop_event.set()
-                    break
-                time.sleep(0.05)
-            return
+            # 保存到 Playbook
+            img = capture_window(hwnd, client_only=True)
+            if img is not None:
+                ih, iw = img.shape[:2]
+                from .wechat_playbook import save_button, save_search_result
+                if action_label == "search_result":
+                    save_search_result(keyword, client_x, client_y, iw, ih)
+                else:
+                    save_button(keyword, action_label, client_x, client_y, iw, ih)
+                print(f"[PLAYBOOK] 人工辅助 → 已保存 {action_label}: keyword={keyword}, ({client_x},{client_y})")
 
-        # 消息循环
-        msg = w32.MSG()
-        while not stop_event.is_set():
-            ret = user32_lib.GetMessageW(ctypes.byref(msg), 0, 0, 0)
-            if ret <= 0:
-                break
-            user32_lib.TranslateMessage(ctypes.byref(msg))
-            user32_lib.DispatchMessageW(ctypes.byref(msg))
+            return (client_x, client_y)
+        time.sleep(0.05)
 
-    listener_thread = threading.Thread(target=mouse_listener, daemon=True)
-    listener_thread.start()
-
-    try:
-        listener_thread.join(timeout=60.0)
-        if not stop_event.is_set():
-            print("\n[WARN] 超时（60 秒），人工辅助已取消")
-            return None
-    except KeyboardInterrupt:
-        print("\n[INFO] 人工辅助已取消")
-        return None
-
-    screen_pos = click_result[0]
-    if screen_pos is None:
-        return None
-
-    sx, sy = screen_pos
-    # 转为客户区坐标
-    client_x = sx - win_x
-    # 标题栏偏移（约 30px for Win11）
-    client_y = sy - win_y - 30
-    if client_y < 0:
-        client_y = 0
-
-    print(f"✅ 人工点击位置: 屏幕({sx}, {sy}) → 客户区({client_x}, {client_y})")
-
-    # 保存到 Playbook
-    img = capture_window(hwnd, client_only=True)
-    if img is not None:
-        img_h, img_w = img.shape[:2]
-        from .wechat_playbook import save_button, save_search_result
-        if action_label == "search_result":
-            save_search_result(keyword, client_x, client_y, img_w, img_h)
-            print(f"[PLAYBOOK] 人工辅助 → 已保存 search_result: keyword={keyword}, ({client_x},{client_y})")
-        else:
-            save_button(keyword, action_label, client_x, client_y, img_w, img_h)
-            print(f"[PLAYBOOK] 人工辅助 → 已保存 {action_label}: keyword={keyword}, ({client_x},{client_y})")
-
-    return (client_x, client_y)
+    print("\n[WARN] 超时（60 秒），人工辅助已取消")
+    return None
 
 
 def _get_hwnd() -> int | None:
@@ -377,8 +320,14 @@ def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]
         return "detail", "服务号/公众号详情页"
 
     # 聊天窗口
+    has_url = "https://" in all_text or "http://" in all_text
+    has_service_chat = any(kw in all_text for kw in ["Hi", "等你很久了", "联系", "介绍", "大家都在搜"])
+    # 服务号自动回复链接 → 优先判为聊天
+    if has_service_chat and has_url:
+        return "chat", "聊天窗口（含自动回复链接）"
     chat_bottom = ["发送", "按住说话", "可以描述", "产品介绍", "操作视频", "功能"]
-    if sum(1 for kw in chat_bottom if kw in all_text) >= 2:
+    chat_count = sum(1 for kw in chat_bottom if kw in all_text)
+    if chat_count >= 2 or (has_service_chat and chat_count >= 1):
         return "chat", "聊天窗口"
 
     # 主窗口
@@ -434,6 +383,17 @@ def _observe() -> str:
             if len(visible_texts) >= 12:
                 break
 
+    # ── 强制注入关注状态关键词 ──
+    # 这些词对决策至关重要，即使置信度偏低也不应被挤出
+    # 同时在原始全量（有空格/无空格拼接）上匹配，防止 OCR 分词拆分
+    critical_kws = ["已关注", "取消关注", "私信", "发消息", "关注"]
+    all_text_joined = " ".join([t[0] for t in ocr_results])
+    all_text_raw = all_text_joined.replace(" ", "")  # 消除 OCR 分词产生的空格
+    for kw in critical_kws:
+        if kw in all_text_raw and kw not in seen:
+            visible_texts.insert(0, kw)
+            seen.add(kw)
+
     # 绿色按钮检测
     green_positions = []
     try:
@@ -481,15 +441,18 @@ def _observe() -> str:
         else:
             lines.append("【判断】搜索结果已显示，检查是否找到目标服务号。")
     elif page_type == "detail":
-        has_followed = any("已关注" in t or "取消关注" in t for t in visible_texts)
+        # 关注状态判断：OCR 文字 + 绿色按钮双重验证
+        has_followed_text = any("已关注" in t or "取消关注" in t for t in visible_texts)
+        # 绿色按钮列表里有「关注」→ 未关注；没有 → 已关注（按钮变灰/消失）
+        has_green_follow = any("关注" in gp and "已关注" not in gp for gp in green_positions)
         has_follow_btn = any(
             ("关注" in t and "已关注" not in t and "取消关注" not in t)
             for t in visible_texts
         )
         has_msg_btn = any(kw in " ".join(visible_texts) for kw in ["私信", "发消息"])
-        if has_followed:
+        if has_followed_text or not has_green_follow:
             if has_msg_btn:
-                lines.append("【判断】已关注此服务号（看到「取消关注」或「已关注」）。可以点击「私信」发送消息。")
+                lines.append("【判断】已关注此服务号。可以点击「私信」发送消息。")
             else:
                 lines.append("【判断】已关注此服务号。如需发消息，请点击「私信」（如按钮可见）。")
         elif has_follow_btn:
@@ -743,7 +706,30 @@ def wechat_click_button(target: str) -> str:
             if cached:
                 sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
                 pyautogui.click(sx, sy)
-                time.sleep(2.0)
+                time.sleep(1.5)
+                # 鼠标移开，避免挡住文字
+                safe_sx, safe_sy = _window_client_to_screen(hwnd, 50, 50)
+                pyautogui.moveTo(safe_sx, safe_sy, duration=0.1)
+                time.sleep(0.5)
+                # 检测取消关注弹窗
+                img2 = capture_window(hwnd, client_only=True)
+                if img2 is not None:
+                    popup_texts = [t[0] for t in _ocr_image(img2) if t[2] >= 0.25]
+                    if any("不再关注" in t for t in popup_texts) or any("仍要关注" in t for t in popup_texts):
+                        print("[AGENT] 检测到「取消关注」确认弹窗 → 已关注，关闭弹窗")
+                        pyautogui.press('escape')
+                        time.sleep(0.5)
+                        _clear_retry("click_button:关注")
+                        return f"✅ 检测到取消关注弹窗，说明已关注，弹窗已关闭\n\n{_observe()}"
+                # 直接截图 OCR 校验（不依赖 _observe 的 top-12 筛选）
+                img3 = capture_window(hwnd, client_only=True)
+                if img3 is not None:
+                    raw_ocr = [t[0] for t in _ocr_image(img3) if t[2] >= 0.15]
+                    raw_joined = "".join(raw_ocr)
+                    if any(kw in raw_joined for kw in ["已关注", "取消关注", "私信"]):
+                        _clear_retry("click_button:关注")
+                        return f"✅ 从缓存点击「关注」成功\n\n{_observe()}"
+                # 兜底：_observe 校验
                 obs = _observe()
                 if "已关注" in obs or "私信" in obs or "取消关注" in obs:
                     _clear_retry("click_button:关注")
@@ -775,13 +761,47 @@ def wechat_click_button(target: str) -> str:
         sx, sy = _window_client_to_screen(hwnd, cx, cy)
         pyautogui.moveTo(sx, sy, duration=0.1)
         pyautogui.click(sx, sy)
-        time.sleep(2.0)
+        time.sleep(1.5)
+
+        # ── 鼠标移开，避免挡住「已关注」/「取消关注」文字 ──
+        # 移到窗口左上角安全区域（远离所有按钮）
+        safe_sx, safe_sy = _window_client_to_screen(hwnd, 50, 50)
+        pyautogui.moveTo(safe_sx, safe_sy, duration=0.1)
+        time.sleep(0.5)
+
+        # ── 检测「取消关注」确认弹窗 ──
+        # 如果点击的是未关注状态 → 关注成功；如果点的是已关注状态 → 弹出"不再关注"/"仍要关注"
+        img2 = capture_window(hwnd, client_only=True)
+        if img2 is not None:
+            popup_texts = [t[0] for t in _ocr_image(img2) if t[2] >= 0.25]
+            if any("不再关注" in t for t in popup_texts) or any("仍要关注" in t for t in popup_texts):
+                # 弹出取消关注确认窗 → 说明已经关注了，点「仍要关注」或 Esc 取消弹窗
+                print("[AGENT] 检测到「取消关注」确认弹窗 → 已关注，关闭弹窗")
+                pyautogui.press('escape')
+                time.sleep(0.5)
+                _clear_retry("click_button:关注")
+                return f"✅ 检测到取消关注弹窗，说明已关注，弹窗已关闭\n\n{_observe()}"
 
         # Playbook：缓存关注按钮位置
         if _HAS_PLAYBOOK and _LAST_KEYWORD:
             save_button(_LAST_KEYWORD, "follow", cx, cy, img_w, img_h)
 
-        # 验证：重试一次如果附近没变化
+        # 验证：鼠标移开避免挡字，再重截图
+        safe_sx, safe_sy = _window_client_to_screen(hwnd, 50, 50)
+        pyautogui.moveTo(safe_sx, safe_sy, duration=0.1)
+        time.sleep(0.5)
+
+        # 检测取消关注弹窗
+        img2 = capture_window(hwnd, client_only=True)
+        if img2 is not None:
+            popup_texts = [t[0] for t in _ocr_image(img2) if t[2] >= 0.25]
+            if any("不再关注" in t for t in popup_texts) or any("仍要关注" in t for t in popup_texts):
+                print("[AGENT] 检测到「取消关注」确认弹窗 → 已关注，关闭弹窗")
+                pyautogui.press('escape')
+                time.sleep(0.5)
+                _clear_retry("click_button:关注")
+                return f"✅ 检测到取消关注弹窗，说明已关注，弹窗已关闭\n\n{_observe()}"
+
         obs = _observe()
         if "已关注" in obs or "私信" in obs or "取消关注" in obs:
             _clear_retry("click_button:关注")
@@ -789,9 +809,23 @@ def wechat_click_button(target: str) -> str:
         else:
             # 微调 y+20 重试
             sy2 = sy + 20
-            pyautogui.moveTo(sx, sy2, duration=0.1)
-            pyautogui.click(sx, sy2)
-            time.sleep(2.0)
+            sx2, sy2_sc = _window_client_to_screen(hwnd, cx, cy + 20)
+            pyautogui.moveTo(sx2, sy2_sc, duration=0.1)
+            pyautogui.click(sx2, sy2_sc)
+            time.sleep(1.5)
+            # 鼠标移开
+            pyautogui.moveTo(safe_sx, safe_sy, duration=0.1)
+            time.sleep(0.5)
+            # 再检测弹窗
+            img3 = capture_window(hwnd, client_only=True)
+            if img3 is not None:
+                popup_texts3 = [t[0] for t in _ocr_image(img3) if t[2] >= 0.25]
+                if any("不再关注" in t for t in popup_texts3) or any("仍要关注" in t for t in popup_texts3):
+                    print("[AGENT] 检测到「取消关注」确认弹窗(y+20) → 已关注，关闭弹窗")
+                    pyautogui.press('escape')
+                    time.sleep(0.5)
+                    _clear_retry("click_button:关注")
+                    return f"✅ 检测到取消关注弹窗，说明已关注，弹窗已关闭\n\n{_observe()}"
             obs = _observe()
             return f"⚠️ 点击「关注」后状态未明确变化\n\n{obs}"
 
@@ -880,12 +914,59 @@ def wechat_type_and_send(message: str) -> str:
             if cached:
                 sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
                 pyautogui.click(sx, sy)
+                time.sleep(0.8)
+                # 验证：重截图看输入框是否出现
+                img_check = capture_window(hwnd, client_only=True)
+                if img_check is not None:
+                    bottom_text = " ".join(t[0] for t in _ocr_image(img_check[int(img_check.shape[0] * 0.7):, :]) if t[2] >= 0.15)
+                    if any(kw in bottom_text for kw in ["发送", "可以描述", "输入", "按住"]):
+                        kb_clicked = True
+                        print(f"[AGENT] 从缓存点击键盘图标 → 输入框已出现")
+                        img = img_check
+                        img_h, img_w = img.shape[:2]
+        if not kb_clicked:
+            # 视觉定位键盘图标：右下角小图标（通常 30-50px，灰色/浅色）
+            kb_x, kb_y = None, None
+            # 策略 1: OCR 找"键盘"或"切换"
+            roi_corner = img[img_h - 120:img_h, img_w - 180:img_w]
+            corner_texts = _ocr_image(roi_corner)
+            for t, bbox, c in corner_texts:
+                if any(kw in t for kw in ["键盘", "切换", "输入", "文字"]):
+                    xs = [p[0] for p in bbox]
+                    ys = [p[1] for p in bbox]
+                    kb_x = img_w - 180 + int(sum(xs) / len(xs))
+                    kb_y = img_h - 120 + int(sum(ys) / len(ys))
+                    print(f"[AGENT] OCR 定位键盘图标: 「{t}」 at ({kb_x}, {kb_y})")
+                    break
+            # 策略 2: 右下角找小图标颜色块（图标通常偏暗灰色）
+            if kb_x is None:
+                roi_corner = img[img_h - 100:img_h, img_w - 100:img_w]
+                gray = cv2.cvtColor(roi_corner, cv2.COLOR_BGR2GRAY)
+                # 找 20-50px 的暗色连通区域
+                _, thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for ct in contours:
+                    xc, yc, wc, hc = cv2.boundingRect(ct)
+                    if 15 <= wc <= 60 and 15 <= hc <= 60 and wc * hc >= 200:
+                        kb_x = img_w - 100 + xc + wc // 2
+                        kb_y = img_h - 100 + yc + hc // 2
+                        print(f"[AGENT] 轮廓定位键盘图标: area={wc*hc}, at ({kb_x}, {kb_y})")
+                        break
+            if kb_x is not None:
+                sx, sy = _window_client_to_screen(hwnd, kb_x, kb_y)
+                pyautogui.click(sx, sy)
                 time.sleep(0.5)
                 kb_clicked = True
-                print(f"[AGENT] 从缓存点击键盘图标")
-        if not kb_clicked:
-            # 所有视觉策略都失败 → 人工辅助
-            print("[AGENT] 视觉定位键盘图标失败，请求人工辅助...")
+                # 保存到 Playbook
+                if _HAS_PLAYBOOK and _LAST_KEYWORD:
+                    save_button(_LAST_KEYWORD, "keyboard_toggle", kb_x, kb_y, img_w, img_h)
+        # 重截图
+        if kb_clicked:
+            img = capture_window(hwnd, client_only=True)
+            img_h, img_w = img.shape[:2]
+        else:
+            # 全部失败 → 人工辅助
+            print("[AGENT] 键盘图标视觉定位失败，请求人工辅助...")
             kw = _LAST_KEYWORD if _LAST_KEYWORD else "unknown"
             result = _request_human_assist("keyboard_toggle", hwnd, kw)
             if result is None:
@@ -895,9 +976,9 @@ def wechat_type_and_send(message: str) -> str:
             pyautogui.click(sx, sy)
             time.sleep(0.5)
             kb_clicked = True
-        # 重截图
-        img = capture_window(hwnd, client_only=True)
-        img_h, img_w = img.shape[:2]
+            # 重截图
+            img = capture_window(hwnd, client_only=True)
+            img_h, img_w = img.shape[:2]
 
     # ── Step 1: 定位输入框 ──
     roi_bottom = img[int(img_h * 0.65):, :]
@@ -907,11 +988,12 @@ def wechat_type_and_send(message: str) -> str:
     if _HAS_PLAYBOOK and _LAST_KEYWORD and not input_found:
         cached = lookup_button(_LAST_KEYWORD, "input_box", img_w, img_h)
         if cached:
-            sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
+            input_cx, input_cy = cached[0], cached[1]
+            sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
             pyautogui.moveTo(sx, sy, duration=0.1)
             pyautogui.click(sx, sy)
             input_found = True
-            print(f"[AGENT] 从缓存定位输入框: {cached}")
+            print(f"[AGENT] 从缓存定位输入框: ({input_cx}, {input_cy})")
 
     # 策略1: OCR 找"发送"按钮，输入框在左边
     if not input_found:
