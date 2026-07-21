@@ -1,27 +1,27 @@
 {
   "火眼审阅": {
     "search_result": {
-      "x_pct": 0.1598,
-      "y_pct": 0.1531
+      "x_pct": 0.5,
+      "y_pct": 0.2552
     },
-    "client_w": 897,
+    "client_w": 1320,
     "client_h": 960,
-    "updated": "2026-07-20T14:25:34",
+    "updated": "2026-07-22T00:51:54",
     "follow": {
-      "x_pct": 0.2642,
-      "y_pct": 0.2826
+      "x_pct": 0.3432,
+      "y_pct": 0.1875
     },
     "send_msg": {
-      "x_pct": 0.4408,
-      "y_pct": 0.2826
-    },
-    "input_box": {
-      "x_pct": 0.4972,
-      "y_pct": 0.85
+      "x_pct": 0.4614,
+      "y_pct": 0.1875
     },
     "keyboard_toggle": {
-      "x_pct": 0.9498,
-      "y_pct": 0.9531
+      "x_pct": 0.8038,
+      "y_pct": 0.95
+    },
+    "input_box": {
+      "x_pct": 0.4,
+      "y_pct": 0.9521
     }
   }
 }

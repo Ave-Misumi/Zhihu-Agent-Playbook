@@ -22,71 +22,99 @@ WPS_KEYWORDS = [
     "文档", "排版", "导出pdf", "导出PDF", "导出 pdf", "导出 PDF",
     "pdf", "PDF", "docx", ".docx", "保存为",
     "写篇", "写一篇文章", "生成一篇", "生成文章",
-    "txt",
+    "txt"
 ]
-
 WECHAT_KEYWORDS = [
-    "微信", "wechat", "WeChat",
-    "服务号", "公众号", "关注",
-    "私信", "发消息", "发微信",
+    "微信", "服务号", "公众号", "发私信", "关注",
 ]
 
-
-def _route_intent(text: str) -> str:
-    """返回 "zhihu" | "wps" | "wechat" """
-    # 微信特征词优先
-    if any(kw in text for kw in WECHAT_KEYWORDS) and any(kw in text for kw in ["微信", "wechat", "WeChat"]):
+def _route_intent(user_task: str) -> str:
+    """根据用户输入关键词路由到对应链路"""
+    # 微信优先（关键词更具体）
+    if any(kw in user_task for kw in WECHAT_KEYWORDS):
         return "wechat"
-    # WPS 特征词
-    if any(kw in text for kw in WPS_KEYWORDS):
+    if any(kw in user_task for kw in WPS_KEYWORDS):
         return "wps"
-    # 知乎特征词
-    if any(kw in text for kw in ["知乎", "zhihu", "浏览", "搜索", "评论", "收藏", "点赞"]):
-        return "zhihu"
-    # 默认知乎
     return "zhihu"
 
 
 async def run_zhihu(user_task: str):
     from agent.core import create_zhihu_agent
-    print(f"==> 知乎模式 | browser-use Agent | 你说: {user_task}")
     agent = await create_zhihu_agent(user_task)
-    print("==> 浏览器已启动，Agent 开始执行...")
-    history = await agent.run()
-    print(f"==> 完成！共 {len(history)} 步。")
-    return history
+    await agent.run()
 
 
 async def run_wps(user_task: str):
     from agent.core import create_wps_agent
-    print(f"==> WPS 模式 | LangChain ReAct Agent | 你说: {user_task}")
-    agent_graph, task = await create_wps_agent(user_task)
-    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
-    # 提取最后一条 AI 消息作为结果
-    output = "无输出"
-    if "messages" in result:
-        for msg in reversed(result["messages"]):
-            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
-                output = msg.content
-                break
-    print(f"==> 完成！\n{output}")
-    return result
+    agent_graph, final_task = await create_wps_agent(user_task)
+    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": final_task}]})
+    msgs = result.get("messages", [])
+    if msgs:
+        last = msgs[-1]
+        print(f"\n{'='*60}")
+        print(f"==> WPS Agent 执行完毕")
+        if hasattr(last, "content"):
+            print(f"==> {last.content[:300]}")
+        print(f"{'='*60}\n")
 
 
 async def run_wechat(user_task: str):
     from agent.core import create_wechat_agent
-    print(f"==> 微信模式 | LangChain ReAct Agent | 你说: {user_task}")
+    print(f"\n{'='*60}")
+    print(f"==> 微信模式 | LangChain ReAct Agent")
+    print(f"==> 你说: {user_task}")
+    print(f"{'='*60}")
+
     agent_graph, task = await create_wechat_agent(user_task)
-    result = await agent_graph.ainvoke({"messages": [{"role": "user", "content": task}]})
-    # 提取最后一条 AI 消息作为结果
-    output = "无输出"
-    if "messages" in result:
-        for msg in reversed(result["messages"]):
-            if hasattr(msg, "content") and msg.type == "ai" and msg.content:
-                output = msg.content
-                break
-    print(f"==> 完成！\n{output}")
-    return result
+    print("\n[Agent] 启动中，等待 LLM 首次响应...")
+
+    step = 0
+    last_was_tool: bool = False
+    async for chunk in agent_graph.astream(
+        {"messages": [{"role": "user", "content": task}]},
+        stream_mode="updates",
+    ):
+        step += 1
+        for node_name, node_output in chunk.items():
+            msgs = node_output.get("messages", [])
+            for msg in msgs:
+                if hasattr(msg, "content") and msg.content:
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        # LLM 决定调用工具
+                        for tc in msg.tool_calls:
+                            print(f"\n{'─'*50}")
+                            print(f"[Step {step}] LLM => {tc['name']}")
+                            args_str = ", ".join(
+                                f"{k}={repr(v)[:80]}"
+                                for k, v in tc.get("args", {}).items()
+                            )
+                            print(f"        参数: {args_str}")
+                            print(f"{'─'*50}")
+                            print(f"[Agent] 执行工具中...", end="", flush=True)
+                            last_was_tool = True
+                    elif hasattr(msg, "type") and msg.type == "tool":
+                        # 工具返回结果
+                        content = str(msg.content)
+                        if len(content) > 500:
+                            content = content[:500] + "\n... (截断)"
+                        if last_was_tool:
+                            print(f"\r{' '*30}")  # 清除 "执行工具中..."
+                            last_was_tool = False
+                        print(f"        返回: {content}")
+                        print(f"[Agent] LLM 思考下一步...", end="", flush=True)
+                    else:
+                        # LLM 纯文本（如计划、反思）
+                        text = str(msg.content)
+                        if len(text) > 200:
+                            text = text[:200] + "..."
+                        if last_was_tool:
+                            print(f"\r{' '*30}")
+                            last_was_tool = False
+                        print(f"[LLM] {text}")
+
+    print(f"\n{'='*60}")
+    print(f"==> Agent 执行完毕 (共 {step} 步)")
+    print(f"{'='*60}\n")
 
 
 async def main():
