@@ -98,6 +98,122 @@ def _clear_retry(step_name: str):
     _RETRY_COUNTS.pop(step_name, None)
 
 
+def _request_human_assist(action_label: str, hwnd: int, keyword: str) -> tuple[int, int] | None:
+    """三次自动定位失败后，请求人工辅助点击并记录坐标到 Playbook。
+
+    流程:
+      1. 打印显眼提示，让用户手动点击目标位置
+      2. 监听鼠标点击事件，捕获屏幕坐标
+      3. 将坐标转为客户区坐标
+      4. 保存到 Playbook 供后续复用
+
+    返回 (client_x, client_y) 或 None（用户取消）。
+    """
+    import threading
+
+    # 获取窗口屏幕位置用于坐标转换
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    win_x, win_y = rect.left, rect.top
+
+    print("\n" + "=" * 60)
+    print(f"🤚 【人工辅助】自动定位「{action_label}」失败 3 次")
+    print(f"   请手动点击目标位置，或按 Ctrl+C 跳过...")
+    print(f"=" * 60)
+
+    click_result: list[tuple[int, int] | None] = [None]
+    stop_event = threading.Event()
+
+    def mouse_listener():
+        """监听下一次鼠标左键按下，记录屏幕坐标"""
+        import ctypes.wintypes as w32
+        user32_lib = ctypes.windll.user32
+        WH_MOUSE_LL = 14
+        WM_LBUTTONDOWN = 0x0201
+
+        hook_id = None
+        def low_level_mouse_proc(nCode, wParam, lParam):
+            if nCode >= 0 and wParam == WM_LBUTTONDOWN:
+                # lParam 指向 MSLLHOOKSTRUCT: pt(8 bytes) + mouseData(4) + flags(4) + time(4) + dwExtraInfo(8)
+                x = ctypes.c_long.from_address(lParam + 4).value  # pt.x
+                y = ctypes.c_long.from_address(lParam + 8).value  # pt.y
+                # MSLLHOOKSTRUCT pt 是 POINT (8 bytes), after that:
+                x = ctypes.c_long.from_address(lParam).value
+                y = ctypes.c_long.from_address(lParam + 4).value
+                click_result[0] = (x, y)
+                stop_event.set()
+                user32_lib.UnhookWindowsHookEx(hook_id)
+                return 0
+            return user32_lib.CallNextHookEx(hook_id, nCode, wParam, lParam)
+
+        CMPFUNC = ctypes.WINFUNCTYPE(ctypes.c_longlong, ctypes.c_int, ctypes.c_longlong, ctypes.c_longlong)
+        hook_proc = CMPFUNC(low_level_mouse_proc)
+        hook_id = user32_lib.SetWindowsHookExW(WH_MOUSE_LL, hook_proc, None, 0)
+
+        if not hook_id:
+            print("[WARN] 无法安装鼠标钩子，回退到轮询模式...")
+            # 轮询模式：检测鼠标按键
+            while not stop_event.is_set():
+                if ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000:
+                    pt = wintypes.POINT()
+                    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+                    click_result[0] = (pt.x, pt.y)
+                    time.sleep(0.3)  # 防抖
+                    stop_event.set()
+                    break
+                time.sleep(0.05)
+            return
+
+        # 消息循环
+        msg = w32.MSG()
+        while not stop_event.is_set():
+            ret = user32_lib.GetMessageW(ctypes.byref(msg), 0, 0, 0)
+            if ret <= 0:
+                break
+            user32_lib.TranslateMessage(ctypes.byref(msg))
+            user32_lib.DispatchMessageW(ctypes.byref(msg))
+
+    listener_thread = threading.Thread(target=mouse_listener, daemon=True)
+    listener_thread.start()
+
+    try:
+        listener_thread.join(timeout=60.0)
+        if not stop_event.is_set():
+            print("\n[WARN] 超时（60 秒），人工辅助已取消")
+            return None
+    except KeyboardInterrupt:
+        print("\n[INFO] 人工辅助已取消")
+        return None
+
+    screen_pos = click_result[0]
+    if screen_pos is None:
+        return None
+
+    sx, sy = screen_pos
+    # 转为客户区坐标
+    client_x = sx - win_x
+    # 标题栏偏移（约 30px for Win11）
+    client_y = sy - win_y - 30
+    if client_y < 0:
+        client_y = 0
+
+    print(f"✅ 人工点击位置: 屏幕({sx}, {sy}) → 客户区({client_x}, {client_y})")
+
+    # 保存到 Playbook
+    img = capture_window(hwnd, client_only=True)
+    if img is not None:
+        img_h, img_w = img.shape[:2]
+        from .wechat_playbook import save_button, save_search_result
+        if action_label == "search_result":
+            save_search_result(keyword, client_x, client_y, img_w, img_h)
+            print(f"[PLAYBOOK] 人工辅助 → 已保存 search_result: keyword={keyword}, ({client_x},{client_y})")
+        else:
+            save_button(keyword, action_label, client_x, client_y, img_w, img_h)
+            print(f"[PLAYBOOK] 人工辅助 → 已保存 {action_label}: keyword={keyword}, ({client_x},{client_y})")
+
+    return (client_x, client_y)
+
+
 def _get_hwnd() -> int | None:
     """获取当前操作窗口。首次调用=登录/启动。"""
     global _CACHED_HWND, _ACTIVE_HWND
@@ -551,28 +667,13 @@ def wechat_click_first_result() -> str:
         target_y = int(cy + 60)
         print(f"[AGENT] 找到「服务号」标签 at ({int(cx)}, {int(cy)}), 点击卡片中心: ({target_x}, {target_y})")
     else:
-        # 兜底：找 y 在 100~300 之间最高的文字，往下偏移
-        candidates = []
-        for text, bbox, conf in ocr_results:
-            t = text.strip()
-            if len(t) < 2 or conf < 0.25:
-                continue
-            xs = [p[0] for p in bbox]
-            ys = [p[1] for p in bbox]
-            cx = sum(xs) / len(xs)
-            cy = sum(ys) / len(ys)
-            if 100 < cy < 350:
-                candidates.append((cy, cx))
-        if candidates:
-            candidates.sort()
-            cy, cx = candidates[0]
-            target_x = img_w // 2
-            target_y = int(cy + 80)
-            print(f"[AGENT] 兜底定位: 第一行文字 at ({int(cx)}, {int(cy)}), 点击: ({target_x}, {target_y})")
-        else:
-            target_x = img_w // 2
-            target_y = 250
-            print(f"[AGENT] 完全兜底坐标: ({target_x}, {target_y})")
+        # 视觉定位失败 → 人工辅助
+        print("[AGENT] 未找到「服务号」标签，请求人工辅助...")
+        kw = _LAST_KEYWORD if _LAST_KEYWORD else "unknown"
+        result = _request_human_assist("search_result", hwnd, kw)
+        if result is None:
+            return "❌ 人工辅助已取消，未点击搜索结果"
+        target_x, target_y = result
 
     from .wechat import _window_client_to_screen
     sx, sy = _window_client_to_screen(hwnd, target_x, target_y)
@@ -783,13 +884,17 @@ def wechat_type_and_send(message: str) -> str:
                 kb_clicked = True
                 print(f"[AGENT] 从缓存点击键盘图标")
         if not kb_clicked:
-            kb_x, kb_y = img_w - 45, img_h - 45
+            # 所有视觉策略都失败 → 人工辅助
+            print("[AGENT] 视觉定位键盘图标失败，请求人工辅助...")
+            kw = _LAST_KEYWORD if _LAST_KEYWORD else "unknown"
+            result = _request_human_assist("keyboard_toggle", hwnd, kw)
+            if result is None:
+                return "❌ 人工辅助已取消，未点击键盘图标"
+            kb_x, kb_y = result
             sx, sy = _window_client_to_screen(hwnd, kb_x, kb_y)
             pyautogui.click(sx, sy)
             time.sleep(0.5)
-            # Playbook：缓存键盘图标位置
-            if _HAS_PLAYBOOK and _LAST_KEYWORD:
-                save_button(_LAST_KEYWORD, "keyboard_toggle", kb_x, kb_y, img_w, img_h)
+            kb_clicked = True
         # 重截图
         img = capture_window(hwnd, client_only=True)
         img_h, img_w = img.shape[:2]
@@ -835,12 +940,15 @@ def wechat_type_and_send(message: str) -> str:
                 input_found = True
                 break
 
-    # 策略3: 底部 12% 中间点击（略微偏上，避开菜单栏）
+    # 策略3: 所有 OCR 策略都失败 → 人工辅助
     if not input_found:
-        input_cx = img_w // 2
-        input_cy = int(img_h * 0.85)
+        print("[AGENT] 视觉定位输入框失败，请求人工辅助...")
+        kw = _LAST_KEYWORD if _LAST_KEYWORD else "unknown"
+        result = _request_human_assist("input_box", hwnd, kw)
+        if result is None:
+            return "❌ 人工辅助已取消，未定位输入框"
+        input_cx, input_cy = result
         sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
-        print(f"[AGENT] 兜底输入框位置: ({input_cx}, {input_cy})")
         pyautogui.moveTo(sx, sy, duration=0.1)
         pyautogui.click(sx, sy)
         input_found = True
