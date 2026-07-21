@@ -42,6 +42,17 @@ from .wechat_vision import (
     _WECHAT_GREEN_HSV_LOW, _WECHAT_GREEN_HSV_HIGH,
 )
 
+try:
+    from .wechat_playbook import (
+        lookup_search_result,
+        save_search_result,
+        lookup_button,
+        save_button,
+    )
+    _HAS_PLAYBOOK = True
+except ImportError:
+    _HAS_PLAYBOOK = False
+
 # ═══════════════════════════════════════════
 # Win32 常量
 # ═══════════════════════════════════════════
@@ -62,7 +73,29 @@ def _find_wechat_hwnd() -> int | None:
 # ═══════════════════════════════════════════
 
 _CACHED_HWND: int | None = None
-_ACTIVE_HWND: int | None = None  # 当前操作窗口（可能是主窗口，也可能是弹出的详情/聊天窗口）
+_ACTIVE_HWND: int | None = None  # 当前操作窗口
+_LAST_KEYWORD: str = ""  # 上次搜索的关键词，用于 playbook
+
+# ═══════════════════════════════════════════
+# 重试计数器（防止无限循环）
+# ═══════════════════════════════════════════
+_RETRY_COUNTS: dict[str, int] = {}  # key: step_name, value: 次数
+_MAX_RETRIES = 3  # 单步最多重试次数
+
+
+def _bump_retry(step_name: str) -> bool:
+    """递增步数，返回 False 表示已达上限。"""
+    global _RETRY_COUNTS
+    count = _RETRY_COUNTS.get(step_name, 0)
+    if count >= _MAX_RETRIES:
+        return False
+    _RETRY_COUNTS[step_name] = count + 1
+    return True
+
+
+def _clear_retry(step_name: str):
+    global _RETRY_COUNTS
+    _RETRY_COUNTS.pop(step_name, None)
 
 
 def _get_hwnd() -> int | None:
@@ -215,8 +248,9 @@ def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]
     if "确认登录" in all_text and "微信" in all_text:
         return "login", "登录面板（手机确认）"
 
-    # 搜索结果
-    has_search = any(kw in all_text for kw in ["搜一搜", "搜索网络", "搜索" "结果"])
+    # 搜索结果（微信搜索框 Enter 后跳转到的结果页）
+    # 特征：有"相关搜索"、搜索词高亮、"工具"、"服务号"标签等
+    has_search = any(kw in all_text for kw in ["搜一搜", "搜索网络", "相关搜索", "搜索结果"])
     if has_search:
         return "search_results", "搜索结果"
 
@@ -272,14 +306,17 @@ def _observe() -> str:
     # 页面分类
     page_type, page_desc = _classify_page(ocr_results, img_w, img_h)
 
-    # 收集可见文字（去重、按置信度排序）
+    # 收集可见文字（精选关键文字，去重、按置信度排序）
+    # 只保留中高置信度文字，避免噪声项淹没 LLM
     visible_texts = []
     seen = set()
     for text, _, conf in sorted(ocr_results, key=lambda r: -r[2]):
         t = text.strip()
-        if t and t not in seen and conf >= 0.2:
+        if t and t not in seen and conf >= 0.35 and len(t) >= 2:
             seen.add(t)
             visible_texts.append(t)
+            if len(visible_texts) >= 12:
+                break
 
     # 绿色按钮检测
     green_positions = []
@@ -303,16 +340,17 @@ def _observe() -> str:
     except Exception:
         pass
 
-    # ── 组装输出 ──
+    # ── 组装输出（精简，只发关键信息） ──
     lines = []
-    lines.append(f"【页面】{page_desc}")
-    lines.append(f"【窗口】{img_w}×{img_h}")
+    lines.append(f"【页面】{page_desc} | {img_w}×{img_h}")
 
     if green_positions:
         lines.append(f"【绿色按钮】{' | '.join(green_positions[:3])}")
 
+    # 精选 TOP 8 个高置信度关键词，不要 dump 全部 OCR
     if visible_texts:
-        lines.append(f"【可见文字】{', '.join(visible_texts[:25])}")
+        top8 = visible_texts[:8]
+        lines.append(f"【关键词】{', '.join(top8)}")
 
     # 给出 LLM 友好的判断
     lines.append("")
@@ -321,15 +359,25 @@ def _observe() -> str:
     elif page_type == "main":
         lines.append("【判断】在主窗口，可以执行搜索。")
     elif page_type == "search_results":
-        lines.append("【判断】搜索结果已显示，可以点击第一条。")
+        has_service = any(kw in " ".join(visible_texts) for kw in ["服务号", "火眼"])
+        if has_service:
+            lines.append("【判断】搜索结果中已出现目标服务号，可以 wechat_click_first_result 进入。")
+        else:
+            lines.append("【判断】搜索结果已显示，检查是否找到目标服务号。")
     elif page_type == "detail":
-        has_followed = any("已关注" in t for t in visible_texts)
-        has_follow_btn = any("关注" in t and "已关注" not in t for t in visible_texts)
+        has_followed = any("已关注" in t or "取消关注" in t for t in visible_texts)
+        has_follow_btn = any(
+            ("关注" in t and "已关注" not in t and "取消关注" not in t)
+            for t in visible_texts
+        )
         has_msg_btn = any(kw in " ".join(visible_texts) for kw in ["私信", "发消息"])
         if has_followed:
-            lines.append("【判断】已关注此服务号。如需发消息，请点击「私信」。")
+            if has_msg_btn:
+                lines.append("【判断】已关注此服务号（看到「取消关注」或「已关注」）。可以点击「私信」发送消息。")
+            else:
+                lines.append("【判断】已关注此服务号。如需发消息，请点击「私信」（如按钮可见）。")
         elif has_follow_btn:
-            lines.append("【判断】尚未关注，可以点击「关注」。")
+            lines.append("【判断】尚未关注，可以点击「关注」。如果点击两次仍为「关注」状态，应跳过关注步骤。")
         elif has_msg_btn:
             lines.append("【判断】可以点击「私信」发送消息。")
         else:
@@ -337,7 +385,7 @@ def _observe() -> str:
     elif page_type == "chat":
         lines.append("【判断】已在聊天窗口，可以直接发送消息。")
     else:
-        lines.append("【判断】未知页面，建议返回主窗口重试。")
+        lines.append("【判断】未知页面，请根据可见文字判断当前状态。")
 
     return "\n".join(lines)
 
@@ -407,24 +455,35 @@ def wechat_search(keyword: str) -> str:
     Returns:
         操作结果 + 当前窗口状态描述
     """
+    global _LAST_KEYWORD, _RETRY_COUNTS
+    _LAST_KEYWORD = keyword  # 记录关键词，供后续 playbook 使用
+
+    if not _bump_retry("wechat_search"):
+        return (
+            "❌ [FATAL] wechat_search 已重试 3 次仍未成功\n"
+            "【建议】请先确认微信已登录并处于主窗口，然后重新运行。"
+        )
     hwnd = _get_hwnd()
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
-    _ensure_foreground(hwnd)
+    # 先确保窗口可见（ShowWindow SW_RESTORE），但不抢焦点防止打断搜索浮层
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    time.sleep(0.2)
+    # 仅 SetForegroundWindow 一次，用于接收 Ctrl+F
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.5)
+
     _open_search()
-    time.sleep(0.3)
+    time.sleep(0.8)  # 等搜索框完全弹出
     _type_text(keyword)
-    time.sleep(0.3)
-    _press_enter()
-
-    # 等搜索结果渲染
-    for _ in range(6):
-        time.sleep(0.5)
-        obs = _observe()
-        if "搜索" in obs:
-            break
-
+    time.sleep(1.0)  # 等搜索下拉建议加载
+    # 微信搜索：第一下 Enter 选中下拉建议，第二下 Enter 跳转结果页
+    pyautogui.press('enter')
+    time.sleep(0.6)
+    pyautogui.press('enter')
+    time.sleep(1.5)  # 等结果页渲染
+    _clear_retry("wechat_search")
     return f"✅ 已搜索「{keyword}」\n\n{_observe()}"
 
 
@@ -440,61 +499,94 @@ def wechat_click_first_result() -> str:
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
-    # 不拉前台：搜索结果在浮层中，拉主窗口会盖住它
+    if not _bump_retry("click_first_result"):
+        return (
+            "❌ [FATAL] 点击第一条搜索结果已重试 3 次仍未成功\n"
+            "【建议】检查搜索结果页面是否变化，或手动点击。"
+        )
 
-    # 截图 + OCR 找到第一条结果的位置
     img = capture_window(hwnd, client_only=True)
     if img is None:
         return "❌ 截图失败"
 
     img_h, img_w = img.shape[:2]
 
-    # 策略：搜索关键词出现在搜索结果中的位置
-    # 微信搜索结果中第一条通常在窗口 y=150~250 范围
-    target_y = None
-    target_x = None
+    # ── Playbook 优先 ──
+    if _HAS_PLAYBOOK and _LAST_KEYWORD:
+        cached = lookup_search_result(_LAST_KEYWORD, img_w, img_h)
+        if cached:
+            from .wechat import _window_client_to_screen
+            sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
+            pyautogui.moveTo(sx, sy, duration=0.1)
+            pyautogui.click(sx, sy)
+            time.sleep(2.0)
+            _refresh_hwnd()
+            _clear_retry("click_first_result")
+            return f"✅ 已从缓存点击第一条搜索结果\n\n{_observe()}"
 
-    # 先试 OCR 定位有文字的区域
+    # ── 视觉定位：找真正的搜索结果入口 ──
+    # 找到第一个「服务号」标签 → 向下偏移 60px → 居中点击
     ocr_results = _ocr_image(img)
-    # 找 y 最小（最靠上）的非搜索框文字
-    candidates = []
+    service_candidates = []
     for text, bbox, conf in ocr_results:
         t = text.strip()
-        if len(t) < 2 or conf < 0.25:
+        if "服务号" not in t:
+            continue
+        if conf < 0.25:
             continue
         xs = [p[0] for p in bbox]
         ys = [p[1] for p in bbox]
-        cx = int(sum(xs) / len(xs))
-        cy = int(sum(ys) / len(ys))
-        # 排除顶部搜索框区域
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
         if cy < 100:
             continue
-        candidates.append((cy, cx, t, conf))
+        service_candidates.append((cy, cx, conf))
 
-    if candidates:
-        candidates.sort()
-        cy, cx, _, _ = candidates[0]
-        target_x = cx
-        target_y = cy
-        print(f"[AGENT] OCR 定位第一条结果: ({target_x}, {target_y})")
-    else:
-        # 兜底：固定 y
+    if service_candidates:
+        # 取最靠上的「服务号」标签
+        service_candidates.sort()
+        cy, cx, _ = service_candidates[0]
+        # 点击位置：卡片宽度约 img_w 的 80%，居中点击，高度在标签下方约 60px
         target_x = img_w // 2
-        target_y = 180
-        print(f"[AGENT] OCR 未找到，兜底坐标: ({target_x}, {target_y})")
+        target_y = int(cy + 60)
+        print(f"[AGENT] 找到「服务号」标签 at ({int(cx)}, {int(cy)}), 点击卡片中心: ({target_x}, {target_y})")
+    else:
+        # 兜底：找 y 在 100~300 之间最高的文字，往下偏移
+        candidates = []
+        for text, bbox, conf in ocr_results:
+            t = text.strip()
+            if len(t) < 2 or conf < 0.25:
+                continue
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            cx = sum(xs) / len(xs)
+            cy = sum(ys) / len(ys)
+            if 100 < cy < 350:
+                candidates.append((cy, cx))
+        if candidates:
+            candidates.sort()
+            cy, cx = candidates[0]
+            target_x = img_w // 2
+            target_y = int(cy + 80)
+            print(f"[AGENT] 兜底定位: 第一行文字 at ({int(cx)}, {int(cy)}), 点击: ({target_x}, {target_y})")
+        else:
+            target_x = img_w // 2
+            target_y = 250
+            print(f"[AGENT] 完全兜底坐标: ({target_x}, {target_y})")
 
-    # 坐标转换并点击
     from .wechat import _window_client_to_screen
     sx, sy = _window_client_to_screen(hwnd, target_x, target_y)
     pyautogui.moveTo(sx, sy, duration=0.1)
     pyautogui.click(sx, sy)
 
-    # 等新窗口弹出
-    time.sleep(2.0)
+    # Playbook：缓存搜索结果点击位置
+    if _HAS_PLAYBOOK and _LAST_KEYWORD:
+        save_search_result(_LAST_KEYWORD, target_x, target_y, img_w, img_h)
 
-    # 刷新 hwnd（可能在新窗口）
+    time.sleep(2.0)
     _refresh_hwnd()
 
+    _clear_retry("click_first_result")
     return f"✅ 已点击第一条搜索结果\n\n{_observe()}"
 
 
@@ -516,6 +608,12 @@ def wechat_click_button(target: str) -> str:
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
+    if not _bump_retry(f"click_button:{target}"):
+        return (
+            f"❌ [FATAL] 点击「{target}」按钮已重试 3 次仍未成功\n"
+            "【建议】放弃此操作，继续下一步或汇报用户。"
+        )
+
     # 不拉前台！PrintWindow 后台截图 + pyautogui 屏幕坐标点击都不需要窗口在前台
     # 拉前台反而会把主窗口盖到弹出窗口上面
 
@@ -533,10 +631,22 @@ def wechat_click_button(target: str) -> str:
         pyautogui.press('escape')
         time.sleep(0.5)
         _refresh_hwnd()
+        _clear_retry("click_button:返回")
         return f"✅ 已返回\n\n{_observe()}"
 
     # ── 关注按钮（绿色）──
     if target == "关注":
+        # Playbook 优先
+        if _HAS_PLAYBOOK and _LAST_KEYWORD:
+            cached = lookup_button(_LAST_KEYWORD, "follow", img_w, img_h)
+            if cached:
+                sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
+                pyautogui.click(sx, sy)
+                time.sleep(2.0)
+                obs = _observe()
+                if "已关注" in obs or "私信" in obs or "取消关注" in obs:
+                    _clear_retry("click_button:关注")
+                    return f"✅ 从缓存点击「关注」成功\n\n{obs}"
         # 策略 1: 颜色+OCR 双验证
         center = find_button_with_text(img, "关注", y_min=0, y_max=int(img_h * 0.55))
         if center:
@@ -566,9 +676,14 @@ def wechat_click_button(target: str) -> str:
         pyautogui.click(sx, sy)
         time.sleep(2.0)
 
+        # Playbook：缓存关注按钮位置
+        if _HAS_PLAYBOOK and _LAST_KEYWORD:
+            save_button(_LAST_KEYWORD, "follow", cx, cy, img_w, img_h)
+
         # 验证：重试一次如果附近没变化
         obs = _observe()
-        if "已关注" in obs or "私信" in obs:
+        if "已关注" in obs or "私信" in obs or "取消关注" in obs:
+            _clear_retry("click_button:关注")
             return f"✅ 点击「关注」成功\n\n{obs}"
         else:
             # 微调 y+20 重试
@@ -581,6 +696,15 @@ def wechat_click_button(target: str) -> str:
 
     # ── 私信/发消息按钮（非绿色）──
     if target in ("私信", "发消息"):
+        # Playbook 优先
+        if _HAS_PLAYBOOK and _LAST_KEYWORD:
+            cached = lookup_button(_LAST_KEYWORD, "send_msg", img_w, img_h)
+            if cached:
+                sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
+                pyautogui.click(sx, sy)
+                time.sleep(2.0)
+                _refresh_hwnd()
+                return f"✅ 从缓存点击「私信」\n\n{_observe()}"
         # 策略: OCR 全图搜索
         roi = img[:int(img_h * 0.55), :]
         for kw in ("私信", "发消息", "进入公众号", "聊天"):
@@ -592,7 +716,11 @@ def wechat_click_button(target: str) -> str:
                 pyautogui.moveTo(sx, sy, duration=0.1)
                 pyautogui.click(sx, sy)
                 time.sleep(2.0)
+                # Playbook：缓存私信按钮位置
+                if _HAS_PLAYBOOK and _LAST_KEYWORD:
+                    save_button(_LAST_KEYWORD, "send_msg", cx, cy, img_w, img_h)
                 _refresh_hwnd()
+                _clear_retry(f"click_button:{kw}")
                 return f"✅ 已点击「{kw}」\n\n{_observe()}"
 
         # 未找到
@@ -621,6 +749,12 @@ def wechat_type_and_send(message: str) -> str:
     if hwnd is None:
         return "❌ 微信未启动或未登录"
 
+    if not _bump_retry("type_and_send"):
+        return (
+            "❌ [FATAL] 输入发送消息已重试 3 次仍未成功\n"
+            "【建议】放弃发送，汇报用户当前状态。"
+        )
+
     # 不拉前台：PrintWindow 后台截图 + pyautogui 屏幕坐标点击都不需要窗口在前台
 
     img = capture_window(hwnd, client_only=True)
@@ -630,33 +764,90 @@ def wechat_type_and_send(message: str) -> str:
     img_h, img_w = img.shape[:2]
     from .wechat import _window_client_to_screen
 
-    # ── 定位输入框 ──
-    # 聊天输入框在窗口底部（下 25%）
+    # ── Step 0: 检测是否需要展开键盘 ──
+    roi_bottom = img[int(img_h * 0.7):, :]
+    has_input = any(
+        kw in " ".join(t[0] for t in _ocr_image(roi_bottom) if t[2] >= 0.2)
+        for kw in ["发送", "可以描述", "输入", "按住"]
+    )
+    if not has_input:
+        print("[AGENT] 未检测到输入框，点击右下角键盘图标...")
+        # Playbook 优先
+        kb_clicked = False
+        if _HAS_PLAYBOOK and _LAST_KEYWORD:
+            cached = lookup_button(_LAST_KEYWORD, "keyboard_toggle", img_w, img_h)
+            if cached:
+                sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
+                pyautogui.click(sx, sy)
+                time.sleep(0.5)
+                kb_clicked = True
+                print(f"[AGENT] 从缓存点击键盘图标")
+        if not kb_clicked:
+            kb_x, kb_y = img_w - 45, img_h - 45
+            sx, sy = _window_client_to_screen(hwnd, kb_x, kb_y)
+            pyautogui.click(sx, sy)
+            time.sleep(0.5)
+            # Playbook：缓存键盘图标位置
+            if _HAS_PLAYBOOK and _LAST_KEYWORD:
+                save_button(_LAST_KEYWORD, "keyboard_toggle", kb_x, kb_y, img_w, img_h)
+        # 重截图
+        img = capture_window(hwnd, client_only=True)
+        img_h, img_w = img.shape[:2]
+
+    # ── Step 1: 定位输入框 ──
+    roi_bottom = img[int(img_h * 0.65):, :]
     input_found = False
 
-    # 策略 1: OCR 找"发送"按钮，输入框在左边
-    roi_bottom = img[int(img_h * 0.6):, :]
-    send_center = find_text_center(roi_bottom, "发送", confidence=0.25)
-    if send_center:
-        # 输入框在发送按钮左边
-        sx_btn, sy_btn = send_center
-        input_cx = max(50, sx_btn - 150)
-        input_cy = int(img_h * 0.6) + sy_btn
-        sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
-        print(f"[AGENT] 通过「发送」按钮定位输入框: ({input_cx}, {input_cy})")
-        pyautogui.moveTo(sx, sy, duration=0.1)
-        pyautogui.click(sx, sy)
-        input_found = True
+    # Playbook 优先
+    if _HAS_PLAYBOOK and _LAST_KEYWORD and not input_found:
+        cached = lookup_button(_LAST_KEYWORD, "input_box", img_w, img_h)
+        if cached:
+            sx, sy = _window_client_to_screen(hwnd, cached[0], cached[1])
+            pyautogui.moveTo(sx, sy, duration=0.1)
+            pyautogui.click(sx, sy)
+            input_found = True
+            print(f"[AGENT] 从缓存定位输入框: {cached}")
 
-    # 策略 2: 底部 15% 中间点击
+    # 策略1: OCR 找"发送"按钮，输入框在左边
+    if not input_found:
+        send_center = find_text_center(roi_bottom, "发送", confidence=0.25)
+        if send_center:
+            sx_btn, sy_btn = send_center
+            input_cx = max(50, sx_btn - 150)
+            input_cy = int(img_h * 0.65) + sy_btn
+            sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
+            print(f"[AGENT] 通过「发送」按钮定位输入框: ({input_cx}, {input_cy})")
+            pyautogui.moveTo(sx, sy, duration=0.1)
+            pyautogui.click(sx, sy)
+            input_found = True
+
+    # 策略2: 找输入框提示文字
+    if not input_found:
+        for kw in ["可以描述", "描述任务", "输入"]:
+            tip_center = find_text_center(roi_bottom, kw, confidence=0.2)
+            if tip_center:
+                input_cx = tip_center[0]
+                input_cy = int(img_h * 0.65) + tip_center[1]
+                sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
+                print(f"[AGENT] 通过提示文字「{kw}」定位输入框: ({input_cx}, {input_cy})")
+                pyautogui.moveTo(sx, sy, duration=0.1)
+                pyautogui.click(sx, sy)
+                input_found = True
+                break
+
+    # 策略3: 底部 12% 中间点击（略微偏上，避开菜单栏）
     if not input_found:
         input_cx = img_w // 2
-        input_cy = int(img_h * 0.88)
+        input_cy = int(img_h * 0.85)
         sx, sy = _window_client_to_screen(hwnd, input_cx, input_cy)
         print(f"[AGENT] 兜底输入框位置: ({input_cx}, {input_cy})")
         pyautogui.moveTo(sx, sy, duration=0.1)
         pyautogui.click(sx, sy)
         input_found = True
+
+    # Playbook：缓存输入框位置
+    if _HAS_PLAYBOOK and _LAST_KEYWORD and input_found:
+        save_button(_LAST_KEYWORD, "input_box", input_cx, input_cy, img_w, img_h)
 
     time.sleep(0.3)
 
@@ -674,6 +865,7 @@ def wechat_type_and_send(message: str) -> str:
     found = msg_short in obs
 
     if found:
+        _clear_retry("type_and_send")
         return f"✅ 消息「{message[:20]}...」已发送\n\n{obs}"
     else:
         return f"⚠️ 消息已提交但未在聊天记录中检测到「{msg_short}」\n\n{obs}"

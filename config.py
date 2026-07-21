@@ -1186,6 +1186,7 @@ def get_raw_llm():
         timeout=180,
         max_retries=2,
         max_tokens=8192,
+        streaming=True,
     )
 
 
