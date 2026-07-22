@@ -648,7 +648,10 @@ class BridgeLLM:
             'select_dropdown', 'write_file', 'replace_file', 'read_file', 'evaluate',
             'screenshot', 'get_playbook_selector',
             'execute_playwright_action', 'generate_and_insert_svg_image',
-            'ask_human_for_intervention'
+            'ask_human_for_intervention',
+            'wps_create_document_and_export_pdf', 'get_wps_template',
+            'wechat_observe', 'wechat_search', 'wechat_click_first_result',
+            'wechat_click_button', 'wechat_type_and_send',
         }
 
         result = []
@@ -731,6 +734,9 @@ class BridgeLLM:
             "wps_create_document_and_export_pdf",
             "get_wps_template",
             "wechat_search_and_follow", "wechat_send_message",
+            # 微信 Agent 工具
+            "wechat_observe", "wechat_search", "wechat_click_first_result",
+            "wechat_click_button", "wechat_type_and_send",
             # 常见 LLM 幻觉名称 → 自动映射到真实工具
             "get_playwright_action",  # Qwen 常幻觉此名 → 映射为 get_playbook_selector
             "get_playwright_selector",  # Qwen 另一常见幻觉名
@@ -898,8 +904,7 @@ class BridgeLLM:
             #   WPS mode → 只保留 wps_* / get_wps_*
             #   wechat mode → 只保留 wechat_*
             #   zhihu mode → 移除 wps_* / wechat_*
-            ZHIHU_ONLY_KEYS = {"get_playbook_selector", "execute_playwright_action",
-                              "generate_and_insert_svg_image", "ask_human_for_intervention"}
+            ZHIHU_ONLY_KEYS = {"generate_and_insert_svg_image", "ask_human_for_intervention"}
             WPS_ONLY_KEYS = {"wps_create_document_and_export_pdf", "get_wps_template"}
             WECHAT_ONLY_KEYS = {"wechat_search_and_follow", "wechat_send_message"}
             if _CURRENT_AGENT_MODE == "wps":
@@ -1197,4 +1202,6 @@ EDGE_EXECUTABLE_PATH = os.getenv(
     "EDGE_EXECUTABLE_PATH",
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 )
-EDGE_USER_DATA_DIR = os.getenv("EDGE_USER_DATA_DIR", "") or None
+# 默认使用项目本地 profile 持久化 cookie，避免每次都是"隐私模式"
+_DEFAULT_PROFILE = str(Path(__file__).parent / "browser_profile")
+EDGE_USER_DATA_DIR = os.getenv("EDGE_USER_DATA_DIR") or _DEFAULT_PROFILE

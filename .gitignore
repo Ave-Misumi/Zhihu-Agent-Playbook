@@ -15,6 +15,10 @@ build/
 
 # 运行时生成
 memory/zhihu_playbook.json
+memory/zhihu_credentials.json
+
+# 浏览器持久化 profile（含 cookie）
+browser_profile/
 
 # 敏感配置
 .env
