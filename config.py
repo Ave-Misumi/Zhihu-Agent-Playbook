@@ -201,8 +201,9 @@ class BridgeLLM:
     # 自定义 tool key 白名单（来自 tools/ 注册）
     CUSTOM_KEYS = {
         "zhihu_body_input",
+        "zhihu_body_input_with_image",
         "get_playbook_selector",
-        "execute_playwright_action", "generate_and_insert_svg_image",
+        "execute_playwright_action", "generate_and_paste_image",
         "ask_human_for_intervention",
         "wps_create_document_and_export_pdf",
         "get_wps_template",
@@ -210,6 +211,8 @@ class BridgeLLM:
         # 常见 LLM 幻觉名称 → 自动映射到真实工具
         "get_playwright_action",
         "get_playwright_selector",
+        # 旧名称兼容 → LLM 可能仍会输出旧名
+        "generate_and_insert_svg_image",
     }
     ALL_KNOWN_KEYS = BUILTIN_KEYS | CUSTOM_KEYS
 
@@ -648,8 +651,10 @@ class BridgeLLM:
             'wait', 'upload_file', 'search_page', 'save_as_pdf', 'dropdown_options',
             'select_dropdown', 'write_file', 'replace_file', 'read_file', 'evaluate',
             'screenshot', 'zhihu_body_input',
+            'zhihu_body_input_with_image',
             'get_playbook_selector',
-            'execute_playwright_action', 'generate_and_insert_svg_image',
+            'execute_playwright_action', 'generate_and_paste_image',
+            'generate_and_insert_svg_image',
             'ask_human_for_intervention',
             'wps_create_document_and_export_pdf', 'get_wps_template',
             'wechat_observe', 'wechat_search', 'wechat_click_first_result',
@@ -731,8 +736,10 @@ class BridgeLLM:
         # 自定义 tool key 白名单（来自 tools/ 注册）
         CUSTOM_KEYS = {
             "zhihu_body_input",
+            "zhihu_body_input_with_image",
             "get_playbook_selector",
-            "execute_playwright_action", "generate_and_insert_svg_image",
+            "execute_playwright_action", "generate_and_paste_image",
+            "generate_and_insert_svg_image",  # 旧名兼容，_sanitize_actions 会自动映射
             "ask_human_for_intervention",
             "wps_create_document_and_export_pdf",
             "get_wps_template",
@@ -907,7 +914,7 @@ class BridgeLLM:
             #   WPS mode → 只保留 wps_* / get_wps_*
             #   wechat mode → 只保留 wechat_*
             #   zhihu mode → 移除 wps_* / wechat_*
-            ZHIHU_ONLY_KEYS = {"zhihu_body_input", "generate_and_insert_svg_image", "ask_human_for_intervention"}
+            ZHIHU_ONLY_KEYS = {"zhihu_body_input", "zhihu_body_input_with_image", "generate_and_paste_image", "ask_human_for_intervention"}
             WPS_ONLY_KEYS = {"wps_create_document_and_export_pdf", "get_wps_template"}
             WECHAT_ONLY_KEYS = {"wechat_search_and_follow", "wechat_send_message"}
             if _CURRENT_AGENT_MODE == "wps":
@@ -989,12 +996,23 @@ class BridgeLLM:
                     print("[WARN] Auto-filled input.text with default")
 
             # 12b) 修复 generate_and_insert_svg_image 裸字符串：Qwen 常输出字符串而非 dict
+            #      同时将旧工具名映射为新工具名 generate_and_paste_image
             if "generate_and_insert_svg_image" in act:
-                inner = act["generate_and_insert_svg_image"]
+                inner = act.pop("generate_and_insert_svg_image")
+                if isinstance(inner, str):
+                    inner = {"article_topic": inner}
+                    print("[WARN] Auto-wrapped generate_and_insert_svg_image string → dict")
+                # 旧名 → 新名映射
+                act["generate_and_paste_image"] = inner
+                print("[WARN] Mapped old tool name generate_and_insert_svg_image → generate_and_paste_image")
+
+            # 12c) 修复 generate_and_paste_image 裸字符串
+            if "generate_and_paste_image" in act:
+                inner = act["generate_and_paste_image"]
                 if isinstance(inner, str):
                     act = dict(act)
-                    act["generate_and_insert_svg_image"] = {"article_topic": inner}
-                    print("[WARN] Auto-wrapped generate_and_insert_svg_image string → dict")
+                    act["generate_and_paste_image"] = {"article_topic": inner}
+                    print("[WARN] Auto-wrapped generate_and_paste_image string → dict")
 
             # 6) 修复 execute_playwright_action：确保有 selector 字段
             if "execute_playwright_action" in act:
@@ -1008,13 +1026,13 @@ class BridgeLLM:
                         inner["action"] = "click"
                     act["execute_playwright_action"] = inner
 
-            # 7) 修复 generate_and_insert_svg_image：确保有 article_topic
-            if "generate_and_insert_svg_image" in act:
-                inner = act["generate_and_insert_svg_image"]
+            # 7) 修复 generate_and_paste_image：确保有 article_topic
+            if "generate_and_paste_image" in act:
+                inner = act["generate_and_paste_image"]
                 if isinstance(inner, dict) and "article_topic" not in inner:
                     inner["article_topic"] = "AI Agent Trends"
                 elif not inner or inner == {}:
-                    act["generate_and_insert_svg_image"] = {"article_topic": "AI Trends"}
+                    act["generate_and_paste_image"] = {"article_topic": "AI Trends"}
 
             # 8) 修复 ask_human_for_intervention：确保有 reason
             if "ask_human_for_intervention" in act:

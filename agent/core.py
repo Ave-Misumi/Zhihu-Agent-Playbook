@@ -16,9 +16,9 @@ from langchain.agents import create_agent
 from langchain_core.tools import tool as langchain_tool
 
 from config import get_llm, get_raw_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR, set_agent_mode
-from tools.image_gen import generate_and_insert_svg_image
+from tools.image_gen import generate_and_paste_image
 from tools.human_in_loop import ask_human_for_intervention
-from tools.zhihu_body import zhihu_body_input
+from tools.zhihu_body import zhihu_body_input, zhihu_body_input_with_image
 from tools.auto_memory import create_auto_memory_callback
 from tools.wps import wps_create_document_and_export_pdf
 from tools.wps_playbook import get_wps_template
@@ -39,10 +39,10 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 
 ## 可用能力
 - click / input / navigate / scroll / wait / evaluate:浏览器基础操作
-- generate_and_insert_svg_image(article_topic="主题"):程序自带SVG生图工具,调用后自动在编辑器中插入矢量配图。不要自己写SVG/evaluate
+- zhihu_body_input_with_image(html_content="<p>正文</p>", article_topic="标题"):**正文输入+配图一步完成！** 根据标题和正文内容自动生成与内容相关的SVG配图,转为PNG后通过剪贴板粘贴到正文中。这是正文和配图的唯一入口！
 - ask_human_for_intervention:遇到验证码/异常时暂停求助
 - 文章正文由你根据主题自行创作(100~200 字)
-- 配图数量:每篇文章生成1~3张SVG配图,插入到正文适当位置
+- 配图:调用 zhihu_body_input_with_image 时自动生成,无需单独配图
 
 ## 登录（关键！不要卡住）
 - 知乎需要登录才能写文章/评论/收藏
@@ -89,28 +89,28 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
   })();
   ```
   如果返回 NOT_FOUND → wait 2秒再试一次,还是 NOT_FOUND 就 ask_human_for_intervention
-- **正文输入 - 两步走！**:
+- **正文输入+配图 - 一步到位！**:
   **第1步**: click(index=正文区域 contenteditable div 的 index) — 必须先点！
-  **第2步**: zhihu_body_input(html_content="<p>段落一</p><p>段落二</p><p>段落三</p>")
-  返回 "OK:N" = 成功 / "E0" = 编辑器没找到(回到第1步) / "E1" = 输入了但检测为空 / "E2" = 焦点没拿到(手动再点一次正文区域)
-  ⚠️ 正文就靠这个工具！不要用 evaluate 自己写 JS！不能用粘贴！不能塞 HTML 到 evaluate！
+  **第2步**: zhihu_body_input_with_image(html_content="<p>段落一</p><p>段落二</p><p>段落三</p>", article_topic="文章标题")
+  返回 "OK:N|IMG:..." = 正文+配图都成功 / "OK:N|IMG_FAIL:..." = 正文成功但配图失败 / "E0" = 编辑器没找到 / "E1" = 输入失败
+  ⚠️ 正文和配图就靠这个工具！不要用 evaluate 自己写 JS！不要单独调用配图工具！
 - 点「发布」按钮后可能弹出成功提示--关掉即可,不需要等待确认
 - 关闭发布弹窗后你仍然在编辑页,如果需要回首页,请 navigate 到 https://www.zhihu.com
 - 首页顶部有搜索框,输入标题后回车可以搜索文章
 - 搜索不到已发布文章时可以尝试滚动浏览结果,或直接 navigate 到文章 URL
 
 ## 配图规则
-- **必须调用 generate_and_insert_svg_image 工具！** 这是程序自带的 SVG 生图工具
-- 调用方式: generate_and_insert_svg_image(article_topic="文章主题")
-- 正文写完、发布前插入配图，每篇文章生成 1~3 张
-- 在正文 JS 执行前或后调用都可以，工具会自动在富文本编辑器中插入图片
-- **不要自己写 SVG 代码**，不要用 evaluate 或 innerHTML 插入图片，只用这个工具
-- 插入配图后等待 2 秒让编辑器渲染完成，再检查发布按钮是否可用
+- **配图已内置到正文输入工具中！** 调用 zhihu_body_input_with_image 时会自动生成配图
+- 配图是根据 article_topic 和 html_content 内容智能生成的，会提取关键词并匹配配色方案
+- 配图流程: SVG生成 → 浏览器Canvas转PNG → 系统剪贴板 → Ctrl+V粘贴到编辑器
+- **不要自己写 SVG 代码**，不要用 evaluate 插入图片，不要单独调用配图工具
+- 如果返回 IMG_FAIL，可以忽略，正文已成功输入，直接继续发布
 
 ## 禁忌
 - 禁止给自己的文章/内容点赞(知乎不允许)
 - 不要调用 playbook 查询工具--直接用基础操作
 - **禁止进创作中心!** 写文章只用 navigate 到 zhuanlan.zhihu.com/write,不要在首页点创作中心按钮
+- **禁止用 evaluate 自己写 JS 输入正文或插入图片！只能用 zhihu_body_input_with_image 工具！**
 
 ## 行为准则
 - 读懂用户的自然语言,拆解为先后步骤,逐一执行
@@ -288,11 +288,14 @@ def create_zhihu_tools() -> Tools:
     """知乎链路:纯LLM决策 + 编辑器专用工具"""
     tools = Tools()
     tools.registry.action(
-        description="向知乎正文编辑器输入HTML文章内容。传入html_content='<p>段落1</p><p>段落2</p>...',返回OK:N/E0/E1。正文就靠这个工具写，不要用evaluate自己写JS！"
+        description="向知乎正文编辑器输入HTML文章内容并自动生成配图。传入html_content='<p>段落1</p><p>段落2</p>...'和article_topic='文章标题'。返回OK:N|IMG:M(正文+配图都成功)或OK:N|IMG_FAIL:...(正文成功配图失败)。正文和配图就靠这个工具写！不要用evaluate自己写JS！"
+    )(zhihu_body_input_with_image)
+    tools.registry.action(
+        description="向知乎正文编辑器输入HTML文章内容（仅正文，不配图）。传入html_content='<p>段落1</p><p>段落2</p>...'。返回OK:N/E0/E1。仅在特殊情况下使用，正常情况下请用zhihu_body_input_with_image。"
     )(zhihu_body_input)
     tools.registry.action(
-        description="根据文章主题生成SVG配图并插入到网页富文本编辑器中。"
-    )(generate_and_insert_svg_image)
+        description="根据文章主题生成SVG配图并粘贴到编辑器（单独配图工具）。传入article_topic='标题'和article_content='正文内容'。一般不需要单独调用，zhihu_body_input_with_image已内置配图功能。"
+    )(generate_and_paste_image)
     tools.registry.action(
         description="遇到验证码、登录卡住或未知异常时暂停等待人工干预。"
     )(ask_human_for_intervention)
