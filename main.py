@@ -41,7 +41,36 @@ def _route_intent(user_task: str) -> str:
 async def run_zhihu(user_task: str):
     from agent.core import create_zhihu_agent
     agent = await create_zhihu_agent(user_task)
-    await agent.run()
+    history = await agent.run()
+    
+    # Token 使用统计
+    print(f"\n{'='*60}")
+    print(f"📊 Token 使用统计")
+    print(f"{'='*60}")
+    usage = None
+    if history and history.usage:
+        usage = history.usage
+    else:
+        # Fallback: 直接从 token_cost_service 获取
+        try:
+            usage = await agent.token_cost_service.get_usage_summary()
+        except Exception as e:
+            print(f"  无法获取 token 统计: {e}")
+    
+    if usage:
+        print(f"  输入 tokens:  {usage.total_prompt_tokens:,}")
+        if usage.total_prompt_cached_tokens > 0:
+            print(f"  缓存 tokens:  {usage.total_prompt_cached_tokens:,}")
+        print(f"  输出 tokens:  {usage.total_completion_tokens:,}")
+        print(f"  总 tokens:    {usage.total_tokens:,}")
+        if usage.total_cost and usage.total_cost > 0:
+            print(f"  总费用:       ${usage.total_cost:.4f}")
+        # Per-model breakdown
+        if usage.by_model:
+            for model, stats in usage.by_model.items():
+                print(f"  --- {model} ---")
+                print(f"    输入: {stats.prompt_tokens:,} | 输出: {stats.completion_tokens:,} | 总计: {stats.total_tokens:,} | 调用次数: {stats.invocations}")
+    print(f"{'='*60}\n")
 
 
 async def run_wps(user_task: str):

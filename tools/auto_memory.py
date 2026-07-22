@@ -152,8 +152,70 @@ def _build_selector(node: Any) -> str | None:
     return None
 
 
+import re as _re
+
+# 动态内容过滤正则：匹配 "赞同 N"、"反对 N"、"N条通知"、"N条私信" 等
+_DYNAMIC_PATTERNS = [
+    _re.compile(r'^赞同\s+\d'),          # 赞同 62, 赞同 2.8 万
+    _re.compile(r'^反对\s*\d*'),          # 反对, 反对 3
+    _re.compile(r'^\d+条通知$'),           # 8条通知, 10条通知
+    _re.compile(r'^\d+条私信$'),           # 8条私信, 1条私信
+    _re.compile(r'^\d+条评论$'),           # N条评论
+    _re.compile(r'话题下的优秀答主'),        # XX话题下的优秀答主
+    _re.compile(r'^已认证'),               # 已认证机构号
+    _re.compile(r'知势榜'),                # 知势榜影响力榜XX领域上榜答主
+    _re.compile(r'^作家，'),               # 作家，代表作...
+    _re.compile(r'^宁波维特'),              # 具体公司名
+    _re.compile(r'法定代表人$'),
+    _re.compile(r'持证人$'),               # XX执业资格证持证人
+    _re.compile(r'^开源项目'),              # 开源项目XX 作者
+    _re.compile(r'\d+个话题下'),           # XX等N个话题下的优秀答主
+    _re.compile(r'^互动量'),               # 互动量
+    _re.compile(r'投放「'),                # 投放计划类广告
+    # 用户身份信息（具体学校/公司/头衔，每次浏览不同用户都不同）
+    _re.compile(r'大学.*硕士'),             # XX大学 XX硕士
+    _re.compile(r'大学.*博士'),             # XX大学 XX博士
+    _re.compile(r'University.*PhD'),        # Gachon University 药物学博士
+    _re.compile(r'University.*Master'),
+    _re.compile(r'行业.*从业人员'),          # XX行业 从业人员
+    _re.compile(r'行业.*经营者'),
+    _re.compile(r'行业.*COO'),
+    _re.compile(r'行业.*商学院副教授'),
+    _re.compile(r'集团.*员工'),             # XX集团 员工
+    _re.compile(r'科技.*董事'),             # XX科技 董事
+    _re.compile(r'科技.*经理'),
+    _re.compile(r'网络科技.*经理'),
+    _re.compile(r'博士后$'),                # XX博士后
+    _re.compile(r'博士在读'),               # XX博士在读
+    _re.compile(r'^知名'),                  # 知名导演、编剧
+    _re.compile(r'^社会学家'),
+    _re.compile(r'^全球'),                  # 全球人工智能教育...
+    _re.compile(r'DeepLearning'),
+    _re.compile(r'导演.*编剧'),
+    _re.compile(r'^新知答主'),
+    _re.compile(r'上榜答主'),
+    _re.compile(r'官方账号$'),              # 知乎 官方账号
+]
+
+
+def _is_dynamic_label(aria: str, placeholder: str = "") -> bool:
+    """检测 aria-label 或 placeholder 是否为动态内容（不应记录到 playbook）"""
+    text = aria or placeholder
+    if not text:
+        return False
+    for pat in _DYNAMIC_PATTERNS:
+        if pat.search(text):
+            return True
+    # placeholder 包含具体搜索词（热搜榜标题）通常也是动态的
+    # 只保留通用 placeholder（请输入标题、搜索你感兴趣的内容等）
+    if placeholder and len(placeholder) > 2:
+        if '请输入' not in placeholder and '搜索你感兴趣' not in placeholder:
+            return True
+    return False
+
+
 def _is_valuable_element(node: Any) -> bool:
-    """判断元素是否有记录价值（交互元素 + 有语义标签）"""
+    """判断元素是否有记录价值（交互元素 + 有语义标签 + 非动态内容）"""
     tag = getattr(node, "node_name", "").lower().strip()
     if tag not in ("a", "button", "input", "textarea", "select"):
         return False
@@ -162,13 +224,19 @@ def _is_valuable_element(node: Any) -> bool:
 
     # 必须有 aria-label 或 placeholder 或 role
     aria = attrs.get("aria-label", "").strip()
+    placeholder = attrs.get("placeholder", "").strip()
+
+    # ★ 动态内容过滤：赞同N、通知N条、热搜词、答主身份等
+    if _is_dynamic_label(aria, placeholder):
+        return False
+
     if aria:
-        # 过滤噪音标签：单字/纯数字/纯拼音/表情/短通用词
+        # 过滤噪音标签
         NOISE_LABELS = {
             "关闭", "返回", "更多", "分享", "举报", "删除", "编辑", "收", "上移", "下移",
             "点赞", "喜欢", "关注", "取消关注", "收藏", "内容管理",
             "消息", "私信", "通知", "首页", "搜索", "设置", "退出",
-            "写文章",  # 这个是真正有用的保留
+            "写文章",
             "创建", "新建", "发布", "提交", "取消", "确定",
             "上一页", "下一页", "加载更多",
             "复制", "粘贴", "全选", "撤销", "重做",
@@ -182,8 +250,12 @@ def _is_valuable_element(node: Any) -> bool:
         if len([c for c in aria if '\u4e00' <= c <= '\u9fff']) < 2:
             return False
         return True
-    if attrs.get("placeholder", "").strip():
-        return True
+    if placeholder:
+        # 已被 _is_dynamic_label 过滤的不会到这里
+        # 只保留通用 placeholder（请输入标题、搜索你感兴趣的内容等）
+        if '请输入' in placeholder or '搜索你感兴趣' in placeholder:
+            return True
+        return False
 
     role = attrs.get("role", "").strip()
     if role in ("button", "link", "textbox", "searchbox", "combobox", "menuitem"):

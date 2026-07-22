@@ -1047,21 +1047,23 @@ def _fix_javascript_string(fn: str) -> str:
 
 
 async def generate_and_paste_image(
+    browser_session: BrowserSession,
     article_topic: str,
-    article_content: str,
-    page
+    article_content: str = "",
 ) -> ActionResult:
     """生成 SVG 配图 → PNG → 剪贴板 → Ctrl+V 粘贴到编辑器
 
     Args:
+        browser_session: browser-use 会话（自动注入）
         article_topic: 文章标题（用于场景识别和标题文字）
-        article_content: 文章正文（辅助场景识别）
-        page: browser-use Page 对象
+        article_content: 文章正文（辅助场景识别，可选）
     
     Returns:
         ActionResult with success/failure info
     """
     import time
+    
+    page = await browser_session.get_current_page()
     
     try:
         # 1. 生成 SVG

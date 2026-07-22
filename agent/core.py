@@ -19,6 +19,7 @@ from config import get_llm, get_raw_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DI
 from tools.image_gen import generate_and_paste_image
 from tools.human_in_loop import ask_human_for_intervention
 from tools.zhihu_body import zhihu_body_input, zhihu_body_input_with_image
+from tools.playbook import get_playbook_selector, execute_playwright_action
 from tools.auto_memory import create_auto_memory_callback
 from tools.wps import wps_create_document_and_export_pdf
 from tools.wps_playbook import get_wps_template
@@ -39,10 +40,31 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 
 ## 可用能力
 - click / input / navigate / scroll / wait / evaluate:浏览器基础操作
+- **get_playbook_selector(page_name, element_description)**:查询操作手册,获取已知元素的CSS选择器。page_name 取值:zhihu/zhihu_write/zhihu_article/zhihu_search/zhihu_login。element_description 用自然语言描述你要操作的元素(如"发布按钮"、"加粗"、"标题输入框")。
+- **execute_playwright_action(selector, action, text?)**:用CSS选择器直接执行操作。action=click/fill/type,text仅fill/type时传。命中手册后比click(index)更快更可靠！
 - zhihu_body_input_with_image(html_content="<p>正文</p>", article_topic="标题"):**正文输入+配图一步完成！** 根据标题和正文内容自动生成与内容相关的SVG配图,转为PNG后通过剪贴板粘贴到正文中。这是正文和配图的唯一入口！
 - ask_human_for_intervention:遇到验证码/异常时暂停求助
 - 文章正文由你根据主题自行创作(100~200 字)
 - 配图:调用 zhihu_body_input_with_image 时自动生成,无需单独配图
+
+## 操作手册加速（重要！）
+系统已缓存知乎各页面的元素选择器（操作手册）。**遇到需要点击/输入的场景，优先查手册！**
+
+**使用流程（2步）：**
+1. get_playbook_selector(page_name="zhihu_write", element_description="加粗") → 返回 CSS 选择器
+2. execute_playwright_action(selector="button[aria-label=\"加粗\"]", action="click") → 直接执行
+
+**何时用手册 vs 基础操作：**
+- **优先用手册**:当你要操作的元素有明确语义描述时(如"发布按钮"、"加粗"、"标题输入框"、"清除格式")
+- **用click(index)**:当手册查不到、或元素是动态内容(如文章列表中的某一篇)时
+- **手册查不到时**:返回会列出该页面已收录的元素,你可以从中选择;如果仍然没有,直接用click(index)基础操作
+
+**手册覆盖的页面和常见元素：**
+- zhihu_write(写作编辑器,28个元素):加粗/斜体/列表/引用/分割线/代码块/图片/链接/公式/表格/附件/导入/草稿备份/创作助手/标题输入框等
+- zhihu_article(文章编辑页,38个元素):同写作编辑器 + 收藏/点赞/评论等
+- zhihu(首页,16个元素):创作按钮/通知/私信/头像等
+- zhihu_search(搜索页,13个元素):搜索框/返回首页/关闭提示等
+- zhihu_login(登录页,6个元素):手机号输入/登录按钮等
 
 ## 登录（关键！不要卡住）
 - 知乎需要登录才能写文章/评论/收藏
@@ -108,12 +130,13 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 
 ## 禁忌
 - 禁止给自己的文章/内容点赞(知乎不允许)
-- 不要调用 playbook 查询工具--直接用基础操作
 - **禁止进创作中心!** 写文章只用 navigate 到 zhuanlan.zhihu.com/write,不要在首页点创作中心按钮
 - **禁止用 evaluate 自己写 JS 输入正文或插入图片！只能用 zhihu_body_input_with_image 工具！**
+- execute_playwright_action 仅用于手册命中后的点击/输入,不要用它执行复杂JS(用evaluate代替)
 
 ## 行为准则
 - 读懂用户的自然语言,拆解为先后步骤,逐一执行
+- **操作手册优先！** 每到一个新页面，如果有需要点击/输入的元素，**第一步就调用 get_playbook_selector 查手册**。手册命中 → execute_playwright_action 直接执行，跳过 DOM 探索。手册没命中 → 才用 click(index)。
 - **弹窗优先直接关闭!** 任何弹窗/对话框/提示窗,先找关闭按钮或X图标点掉,不要截屏分析,不要犹豫
 - 常见需要关闭的弹窗:创作助手、更新提示、广告推广、活动邀请、签到打卡、新功能引导
 - 关闭方式:优先点 aria-label 含"关闭"的按钮 → 点右上角X → 点"我知道了"/"跳过" → Esc
@@ -296,6 +319,12 @@ def create_zhihu_tools() -> Tools:
     tools.registry.action(
         description="根据文章主题生成SVG配图并粘贴到编辑器（单独配图工具）。传入article_topic='标题'和article_content='正文内容'。一般不需要单独调用，zhihu_body_input_with_image已内置配图功能。"
     )(generate_and_paste_image)
+    tools.registry.action(
+        description="查询知乎操作手册，获取页面元素的CSS选择器。传入page_name(如zhihu/zhihu_write/zhihu_article/zhihu_search/zhihu_login)和element_description(自然语言描述你想操作的元素，如'发布按钮'、'标题输入框'、'加粗')。返回CSS选择器供execute_playwright_action使用。优先调用此工具查找已知元素，比逐个点击index更快！"
+    )(get_playbook_selector)
+    tools.registry.action(
+        description="通过CSS选择器直接执行浏览器操作（命中操作手册后的极速执行）。传入selector(CSS选择器)、action(click/fill/type)、text(仅fill/type时需要)。比用click(index)更可靠，因为不受DOM重排影响。"
+    )(execute_playwright_action)
     tools.registry.action(
         description="遇到验证码、登录卡住或未知异常时暂停等待人工干预。"
     )(ask_human_for_intervention)

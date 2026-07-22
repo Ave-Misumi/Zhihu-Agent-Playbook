@@ -28,6 +28,9 @@ def _parse_eval_result(result):
 
 async def _input_body_text(page, paragraphs: list[str]) -> dict:
     """通过 Draft.js 内部节点操作输入正文文本，返回结果字典"""
+    # 使用 json.dumps 确保段落列表安全地传递到 JS 上下文
+    # （避免 Python repr() 与 JS 字符串转义规则不一致的问题）
+    paragraphs_json = json.dumps(paragraphs, ensure_ascii=False)
     result = await page.evaluate(f"""() => {{
         const editor = document.querySelector('[contenteditable="true"]');
         if (!editor) return {{error: 'E0'}};
@@ -57,7 +60,7 @@ async def _input_body_text(page, paragraphs: list[str]) -> dict:
         
         const firstTextSpan = editor.querySelector('[data-text="true"]');
         if (firstTextSpan) {{
-            const text = {paragraphs!r}.join('\\n');
+            const text = {paragraphs_json}.join('\\n');
             firstTextSpan.textContent = text;
             
             firstTextSpan.dispatchEvent(new InputEvent('input', {{

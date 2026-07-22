@@ -2,10 +2,11 @@ import os
 import json
 import re
 from typing import Any
-from dataclasses import dataclass
 from pathlib import Path
 
 import json_repair
+
+from browser_use.llm.views import ChatInvokeCompletion, ChatInvokeUsage
 
 # 当前 agent 模式（由 agent/core.py 设置，_sanitize_actions 据此过滤无关工具）
 _CURRENT_AGENT_MODE = "zhihu"  # "zhihu" | "wps" | "wechat"
@@ -67,14 +68,6 @@ def _validate_config():
             f"  2. .env 文件: 在项目根目录创建 .env 文件（参考 .env.example）\n"
             f"  3. PowerShell: $env:LLM_API_KEY='sk-xxx'\n"
         )
-
-
-@dataclass
-class _Completion:
-    """兼容 browser-use 的 ChatBrowserUse.ainvoke 返回值"""
-    completion: object = None
-    usage: object = None
-
 
 class BridgeLLM:
     """包装 langchain ChatOpenAI，适配 browser-use Agent 接口
@@ -166,6 +159,7 @@ class BridgeLLM:
                         "zhihu_body_input(html_content), "
                         "generate_and_paste_image(article_topic,article_content?), "
                         "ask_human_for_intervention(reason).\n"
+                        "\n**PLAYBOOK ACCELERATION**: Before using click(index), try get_playbook_selector(page_name, element_description) first to get the CSS selector, then use execute_playwright_action(selector, action) to click/fill directly. This is faster and more reliable than click(index). page_name can be: zhihu, zhihu_write, zhihu_article, zhihu_search, zhihu_login.\n"
                         "DO NOT use <tool_call>, <arg_key>, <arg_value>, <think>, or any XML/HTML tags. "
                         "Output ONLY the JSON object, with action FIRST."
                     )
@@ -186,11 +180,37 @@ class BridgeLLM:
         response = await self._llm.ainvoke(converted, **kwargs)
         text = response.content if hasattr(response, "content") else str(response)
 
+        # 提取 token usage 信息
+        usage = None
+        um = getattr(response, "usage_metadata", None)
+        if um:
+            usage = ChatInvokeUsage(
+                prompt_tokens=um.get("input_tokens", 0),
+                completion_tokens=um.get("output_tokens", 0),
+                total_tokens=um.get("total_tokens", 0),
+                prompt_cached_tokens=um.get("input_token_details", {}).get("cache_read", 0) if isinstance(um.get("input_token_details"), dict) else None,
+                prompt_cache_creation_tokens=None,
+                prompt_image_tokens=None,
+            )
+        else:
+            # Fallback: try response_metadata
+            rm = getattr(response, "response_metadata", {})
+            token_usage = rm.get("token_usage", {}) if isinstance(rm, dict) else {}
+            if token_usage:
+                usage = ChatInvokeUsage(
+                    prompt_tokens=token_usage.get("prompt_tokens", 0),
+                    completion_tokens=token_usage.get("completion_tokens", 0),
+                    total_tokens=token_usage.get("total_tokens", 0),
+                    prompt_cached_tokens=None,
+                    prompt_cache_creation_tokens=None,
+                    prompt_image_tokens=None,
+                )
+
         if output_format is not None:
             parsed = self._parse_json_output(text, output_format)
-            return _Completion(completion=parsed)
+            return ChatInvokeCompletion(completion=parsed, usage=usage)
         else:
-            return _Completion(completion=text)
+            return ChatInvokeCompletion(completion=text, usage=usage)
 
     # browser-use 内置 action key 白名单
     BUILTIN_KEYS = {
