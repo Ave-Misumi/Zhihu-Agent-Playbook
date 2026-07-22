@@ -162,7 +162,9 @@ class BridgeLLM:
                         "save_as_pdf(path), upload_file(index,path), replace_file(file_name,content), "
                         "get_playbook_selector(page_name,element_description), "
                         "execute_playwright_action(selector,action,value?), "
-                        "generate_and_insert_svg_image(article_topic), "
+                        "zhihu_body_input_with_image(html_content,article_topic), "
+                        "zhihu_body_input(html_content), "
+                        "generate_and_paste_image(article_topic,article_content?), "
                         "ask_human_for_intervention(reason).\n"
                         "DO NOT use <tool_call>, <arg_key>, <arg_value>, <think>, or any XML/HTML tags. "
                         "Output ONLY the JSON object, with action FIRST."
@@ -1013,6 +1015,50 @@ class BridgeLLM:
                     act = dict(act)
                     act["generate_and_paste_image"] = {"article_topic": inner}
                     print("[WARN] Auto-wrapped generate_and_paste_image string → dict")
+
+            # 12d) 修复 zhihu_body_input_with_image：确保有 html_content 和 article_topic
+            if "zhihu_body_input_with_image" in act:
+                inner = act["zhihu_body_input_with_image"]
+                if isinstance(inner, str):
+                    # 裸字符串 → 当作 html_content
+                    act = dict(act)
+                    act["zhihu_body_input_with_image"] = {"html_content": inner, "article_topic": ""}
+                    print("[WARN] Auto-wrapped zhihu_body_input_with_image string → dict")
+                elif isinstance(inner, dict):
+                    if "html_content" not in inner:
+                        # 尝试用 content / text / body 等常见别名
+                        for alias in ("content", "text", "body", "body_content"):
+                            if alias in inner:
+                                inner["html_content"] = inner.pop(alias)
+                                break
+                        else:
+                            inner["html_content"] = "<p>文章内容</p>"
+                        print("[WARN] Auto-filled zhihu_body_input_with_image.html_content")
+                    if "article_topic" not in inner:
+                        inner["article_topic"] = ""
+                        print("[WARN] Auto-filled zhihu_body_input_with_image.article_topic")
+                elif not inner or inner == {}:
+                    act["zhihu_body_input_with_image"] = {"html_content": "<p>文章内容</p>", "article_topic": ""}
+                    print("[WARN] Auto-filled empty zhihu_body_input_with_image")
+
+            # 12e) 修复 zhihu_body_input：确保有 html_content
+            if "zhihu_body_input" in act:
+                inner = act["zhihu_body_input"]
+                if isinstance(inner, str):
+                    act = dict(act)
+                    act["zhihu_body_input"] = {"html_content": inner}
+                    print("[WARN] Auto-wrapped zhihu_body_input string → dict")
+                elif isinstance(inner, dict) and "html_content" not in inner:
+                    for alias in ("content", "text", "body"):
+                        if alias in inner:
+                            inner["html_content"] = inner.pop(alias)
+                            break
+                    else:
+                        inner["html_content"] = "<p>文章内容</p>"
+                    print("[WARN] Auto-filled zhihu_body_input.html_content")
+                elif not inner or inner == {}:
+                    act["zhihu_body_input"] = {"html_content": "<p>文章内容</p>"}
+                    print("[WARN] Auto-filled empty zhihu_body_input")
 
             # 6) 修复 execute_playwright_action：确保有 selector 字段
             if "execute_playwright_action" in act:

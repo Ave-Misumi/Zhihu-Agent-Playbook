@@ -6,11 +6,24 @@
 3. 返回整体结果
 """
 import re
+import json
 import asyncio
 from browser_use.browser.session import BrowserSession
 from browser_use.tools.service import ActionResult
 
 from tools.image_gen import generate_and_paste_image
+
+
+def _parse_eval_result(result):
+    """browser-use Page.evaluate() 总是返回字符串，需解析为 dict"""
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return {"error": "PARSE_FAIL", "raw": result}
+    if isinstance(result, dict):
+        return result
+    return {"error": "UNEXPECTED_TYPE", "raw": str(result)}
 
 
 async def _input_body_text(page, paragraphs: list[str]) -> dict:
@@ -77,7 +90,7 @@ async def _input_body_text(page, paragraphs: list[str]) -> dict:
     }}""")
     
     print(f"[zhihu_body] Draft.js 内部节点操作: {result}")
-    return result
+    return _parse_eval_result(result)
 
 
 async def _input_body_keyboard(page, paragraphs: list[str]) -> dict:
@@ -93,13 +106,13 @@ async def _input_body_keyboard(page, paragraphs: list[str]) -> dict:
     }""")
     await asyncio.sleep(0.3)
     
-    await page.keyboard.press("Control+a")
+    await page.press("Control+a")
     await asyncio.sleep(0.1)
-    await page.keyboard.press("Delete")
+    await page.press("Delete")
     await asyncio.sleep(0.2)
     
     for char in ''.join(paragraphs):
-        await page.keyboard.press(char)
+        await page.press(char)
         await asyncio.sleep(0.01)
     
     await asyncio.sleep(0.5)
@@ -111,7 +124,7 @@ async def _input_body_keyboard(page, paragraphs: list[str]) -> dict:
         return {len: n, ok: n > 0};
     }""")
     
-    return verify
+    return _parse_eval_result(verify)
 
 
 async def zhihu_body_input_with_image(

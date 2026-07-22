@@ -9,6 +9,7 @@
 import io
 import base64
 import html
+import json
 import random
 import re
 import asyncio
@@ -299,27 +300,7 @@ def generate_svg(topic: str, content: str = "") -> str:
 # SVG → PNG 转换（通过浏览器 Canvas）
 # ═══════════════════════════════════════════════════════════
 
-SVG_TO_PNG_JS = """
-async (svgCode) => {
-    const svg_b64 = btoa(unescape(encodeURIComponent(svgCode)));
-    const svg_data_url = 'data:image/svg+xml;base64,' + svg_b64;
-    
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 720;
-            canvas.height = 420;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, 720, 420);
-            const png_data_url = canvas.toDataURL('image/png');
-            resolve(png_data_url);
-        };
-        img.onerror = (e) => reject('SVG load failed: ' + e.toString());
-        img.src = svg_data_url;
-    });
-}
-"""
+SVG_TO_PNG_JS = "(async (svgCode) => {\n    const svg_b64 = btoa(unescape(encodeURIComponent(svgCode)));\n    const svg_data_url = 'data:image/svg+xml;base64,' + svg_b64;\n    return new Promise((resolve, reject) => {\n        const img = new Image();\n        img.onload = () => {\n            const canvas = document.createElement('canvas');\n            canvas.width = 720;\n            canvas.height = 420;\n            const ctx = canvas.getContext('2d');\n            ctx.drawImage(img, 0, 0, 720, 420);\n            const png_data_url = canvas.toDataURL('image/png');\n            resolve(png_data_url);\n        };\n        img.onerror = (e) => reject('SVG load failed: ' + e.toString());\n        img.src = svg_data_url;\n    });\n})"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -396,39 +377,56 @@ async def generate_and_paste_image(
         return ActionResult(extracted_content=f"配图失败: SVG→PNG 转换异常: {e}")
     
     # 3. PNG 写入系统剪贴板
+    print(f"[image_gen] 准备写入剪贴板, PNG data: {len(png_data_url)} chars")
     ok = _copy_png_to_clipboard(png_data_url)
+    print(f"[image_gen] 剪贴板写入结果: {ok}")
     if not ok:
         return ActionResult(extracted_content=f"配图失败: 剪贴板写入失败")
     
     # 4. 聚焦编辑器并 Ctrl+V 粘贴
+    # 用 JS 点击 + focus 确保编辑器获得焦点
     await page.evaluate("""() => {
         const ed = document.querySelector('[contenteditable="true"]');
-        if (ed) { ed.focus(); }
+        if (ed) { ed.click(); ed.focus(); }
     }""")
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.5)
     
-    await page.keyboard.press("Control+v")
-    await asyncio.sleep(1.0)
+    print("[image_gen] 执行 Ctrl+V 粘贴...")
+    await page.press("Control+v")
+    await asyncio.sleep(1.5)
     
     # 5. 验证图片是否插入成功
-    img_count = await page.evaluate("""() => {
+    img_count_raw = await page.evaluate("""() => {
         const ed = document.querySelector('[contenteditable="true"]');
         if (!ed) return 0;
         return ed.querySelectorAll('img').length;
     }""")
-    
+    try:
+        img_count = int(img_count_raw) if img_count_raw else 0
+    except (ValueError, TypeError):
+        img_count = 0
+
     if img_count > 0:
         return ActionResult(extracted_content=f"OK:配图已插入 (编辑器内 {img_count} 张图片)")
     else:
         # 再次尝试粘贴
+        print("[image_gen] 首次粘贴未检测到图片，重试...")
+        await page.evaluate("""() => {
+            const ed = document.querySelector('[contenteditable="true"]');
+            if (ed) { ed.click(); ed.focus(); }
+        }""")
         await asyncio.sleep(0.5)
-        await page.keyboard.press("Control+v")
-        await asyncio.sleep(1.0)
-        img_count2 = await page.evaluate("""() => {
+        await page.press("Control+v")
+        await asyncio.sleep(1.5)
+        img_count2_raw = await page.evaluate("""() => {
             const ed = document.querySelector('[contenteditable="true"]');
             if (!ed) return 0;
             return ed.querySelectorAll('img').length;
         }""")
+        try:
+            img_count2 = int(img_count2_raw) if img_count2_raw else 0
+        except (ValueError, TypeError):
+            img_count2 = 0
         if img_count2 > 0:
             return ActionResult(extracted_content=f"OK:配图已插入 (重试后成功, {img_count2} 张图片)")
         return ActionResult(extracted_content=f"配图警告: 剪贴板已写入但粘贴未检测到图片，可能需要手动 Ctrl+V")
