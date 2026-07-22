@@ -16,9 +16,9 @@ from langchain.agents import create_agent
 from langchain_core.tools import tool as langchain_tool
 
 from config import get_llm, get_raw_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR, set_agent_mode
-from tools.playbook import get_playbook_selector, execute_playwright_action
 from tools.image_gen import generate_and_insert_svg_image
 from tools.human_in_loop import ask_human_for_intervention
+from tools.zhihu_body import zhihu_body_input
 from tools.auto_memory import create_auto_memory_callback
 from tools.wps import wps_create_document_and_export_pdf
 from tools.wps_playbook import get_wps_template
@@ -89,39 +89,11 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
   })();
   ```
   如果返回 NOT_FOUND → wait 2秒再试一次,还是 NOT_FOUND 就 ask_human_for_intervention
-- **正文输入前必须先点击正文框!** 否则正文内容框检测不到输入,发布按钮将无法点击。
-  知乎正文用 Draft.js,设置 innerHTML 不生效。必须用 execCommand 模拟真实输入:
-  ```js
-  (() => {
-    // 穿透 Shadow DOM
-    const findDeep = (root, sel) => {
-      const el = root.querySelector(sel);
-      if (el) return el;
-      for (const c of root.querySelectorAll('*')) {
-        if (c.shadowRoot) { const f = findDeep(c.shadowRoot, sel); if (f) return f; }
-      }
-      return null;
-    };
-    const editor = findDeep(document, '[contenteditable="true"]');
-    if (!editor) return 'EDITOR_NOT_FOUND';
-    // 先 focus + click 让 Draft.js 拿到焦点
-    editor.focus();
-    editor.click();
-    // 清空现有内容
-    editor.innerHTML = '';
-    // 用 execCommand 逐段插入（Draft.js 能识别）
-    document.execCommand('selectAll', false, null);
-    document.execCommand('insertHTML', false, '<p>第一段内容</p><p>第二段内容</p>');
-    // 触发各事件确保 Draft.js 内部状态更新
-    editor.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertText'}));
-    editor.dispatchEvent(new Event('change', {bubbles:true}));
-    // 验证：检查编辑器内是否真的有内容
-    return editor.textContent.trim().length > 0 ? 'OK:' + editor.textContent.trim().substring(0,50) : 'EMPTY';
-  })();
-  ```
-  返回 EDITOR_NOT_FOUND → wait 2s 重试,还是找不到就 ask_human_for_intervention
-  返回 EMPTY → editor 找到了但没写入成功,重试一次
-  返回 OK:xxx → 写入成功,继续下一步
+- **正文输入 - 两步走！**:
+  **第1步**: click(index=正文区域 contenteditable div 的 index) — 必须先点！
+  **第2步**: zhihu_body_input(html_content="<p>段落一</p><p>段落二</p><p>段落三</p>")
+  返回 "OK:N" = 成功 / "E0" = 编辑器没找到(回到第1步) / "E1" = 输入了但检测为空 / "E2" = 焦点没拿到(手动再点一次正文区域)
+  ⚠️ 正文就靠这个工具！不要用 evaluate 自己写 JS！不能用粘贴！不能塞 HTML 到 evaluate！
 - 点「发布」按钮后可能弹出成功提示--关掉即可,不需要等待确认
 - 关闭发布弹窗后你仍然在编辑页,如果需要回首页,请 navigate 到 https://www.zhihu.com
 - 首页顶部有搜索框,输入标题后回车可以搜索文章
@@ -313,8 +285,11 @@ def _make_browser_profile(headless: bool = False) -> BrowserProfile:
 
 
 def create_zhihu_tools() -> Tools:
-    """知乎链路:只保留通用工具,让LLM用基础操作自行决策"""
+    """知乎链路:纯LLM决策 + 编辑器专用工具"""
     tools = Tools()
+    tools.registry.action(
+        description="向知乎正文编辑器输入HTML文章内容。传入html_content='<p>段落1</p><p>段落2</p>...',返回OK:N/E0/E1。正文就靠这个工具写，不要用evaluate自己写JS！"
+    )(zhihu_body_input)
     tools.registry.action(
         description="根据文章主题生成SVG配图并插入到网页富文本编辑器中。"
     )(generate_and_insert_svg_image)

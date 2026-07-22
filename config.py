@@ -200,6 +200,7 @@ class BridgeLLM:
     }
     # 自定义 tool key 白名单（来自 tools/ 注册）
     CUSTOM_KEYS = {
+        "zhihu_body_input",
         "get_playbook_selector",
         "execute_playwright_action", "generate_and_insert_svg_image",
         "ask_human_for_intervention",
@@ -646,7 +647,8 @@ class BridgeLLM:
             'send_keys', 'find_elements', 'find_text', 'switch', 'close', 'go_back',
             'wait', 'upload_file', 'search_page', 'save_as_pdf', 'dropdown_options',
             'select_dropdown', 'write_file', 'replace_file', 'read_file', 'evaluate',
-            'screenshot', 'get_playbook_selector',
+            'screenshot', 'zhihu_body_input',
+            'get_playbook_selector',
             'execute_playwright_action', 'generate_and_insert_svg_image',
             'ask_human_for_intervention',
             'wps_create_document_and_export_pdf', 'get_wps_template',
@@ -728,6 +730,7 @@ class BridgeLLM:
         }
         # 自定义 tool key 白名单（来自 tools/ 注册）
         CUSTOM_KEYS = {
+            "zhihu_body_input",
             "get_playbook_selector",
             "execute_playwright_action", "generate_and_insert_svg_image",
             "ask_human_for_intervention",
@@ -904,7 +907,7 @@ class BridgeLLM:
             #   WPS mode → 只保留 wps_* / get_wps_*
             #   wechat mode → 只保留 wechat_*
             #   zhihu mode → 移除 wps_* / wechat_*
-            ZHIHU_ONLY_KEYS = {"generate_and_insert_svg_image", "ask_human_for_intervention"}
+            ZHIHU_ONLY_KEYS = {"zhihu_body_input", "generate_and_insert_svg_image", "ask_human_for_intervention"}
             WPS_ONLY_KEYS = {"wps_create_document_and_export_pdf", "get_wps_template"}
             WECHAT_ONLY_KEYS = {"wechat_search_and_follow", "wechat_send_message"}
             if _CURRENT_AGENT_MODE == "wps":

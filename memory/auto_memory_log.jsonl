@@ -114,3 +114,190 @@
 {"ts": "2026-07-22T17:36:01.878583", "step": 2, "page": "zhihu", "label": "button(赞同 6)", "selector": "button[aria-label=\"赞同 6\"]", "url": "https://www.zhihu.com/"}
 {"ts": "2026-07-22T17:36:01.878583", "step": 2, "page": "zhihu", "label": "a(开源项目《ai-guide》 作者)", "selector": "a[aria-label=\"开源项目《ai-guide》 作者\"]", "url": "https://www.zhihu.com/"}
 {"ts": "2026-07-22T17:36:01.878583", "step": 2, "page": "zhihu", "label": "a(黑客 (Hacker)等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"黑客 (Hacker)等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.988391", "step": 2, "page": "zhihu", "label": "a(知乎)", "selector": "a[aria-label=\"知乎\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.989388", "step": 2, "page": "zhihu", "label": "input[placeholder=ai时代普通人何去何从]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.989388", "step": 2, "page": "zhihu", "label": "button(创作)", "selector": "button[aria-label=\"创作\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.990384", "step": 2, "page": "zhihu", "label": "button(8条通知)", "selector": "button[aria-label=\"8条通知\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.990384", "step": 2, "page": "zhihu", "label": "button(8条私信)", "selector": "button[aria-label=\"8条私信\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.990384", "step": 2, "page": "zhihu", "label": "button.Button.AppHeader-profileEntry", "selector": "#Popover3-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.990384", "step": 2, "page": "zhihu", "label": "button.Button.ContentItem-more", "selector": "button.Button.ContentItem-more.FEfUrdfMIKpQDJDqkjte", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.991380", "step": 2, "page": "zhihu", "label": "button(赞同 2)", "selector": "button[aria-label=\"赞同 2\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.991380", "step": 2, "page": "zhihu", "label": "button(反对)", "selector": "button[aria-label=\"反对\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.991380", "step": 2, "page": "zhihu", "label": "button.Button.FEfUrdfMIKpQDJDqkjte", "selector": "button.Button.FEfUrdfMIKpQDJDqkjte.Button--plain", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.991380", "step": 2, "page": "zhihu", "label": "button(赞同 6)", "selector": "button[aria-label=\"赞同 6\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.992391", "step": 2, "page": "zhihu", "label": "button(赞同 361)", "selector": "button[aria-label=\"赞同 361\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.992391", "step": 2, "page": "zhihu", "label": "button.Button.ContentItem-action", "selector": "button.Button.ContentItem-action.FEfUrdfMIKpQDJDqkjte", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.992391", "step": 2, "page": "zhihu", "label": "button(赞同 194)", "selector": "button[aria-label=\"赞同 194\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.992391", "step": 2, "page": "zhihu", "label": "button(赞同 11)", "selector": "button[aria-label=\"赞同 11\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.993411", "step": 2, "page": "zhihu", "label": "button(赞同 6170)", "selector": "button[aria-label=\"赞同 6170\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.993411", "step": 2, "page": "zhihu", "label": "a(边栏锚点)", "selector": "a[aria-label=\"边栏锚点\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.993411", "step": 2, "page": "zhihu", "label": "a(评论活动通知私信-投放「投放计划」)", "selector": "a[aria-label=\"评论活动通知私信-投放「投放计划」\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.993411", "step": 2, "page": "zhihu", "label": "a(下馆子第二季-投放「投放计划」)", "selector": "a[aria-label=\"下馆子第二季-投放「投放计划」\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.993411", "step": 2, "page": "zhihu", "label": "a(Let's学开车-投放「投放计划」)", "selector": "a[aria-label=\"Let's学开车-投放「投放计划」\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.994424", "step": 2, "page": "zhihu", "label": "a(emoji不够用了-投放「投放计划」)", "selector": "a[aria-label=\"emoji不够用了-投放「投放计划」\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.994424", "step": 2, "page": "zhihu", "label": "a(提问大赛-仲夏季-投放「投放计划」)", "selector": "a[aria-label=\"提问大赛-仲夏季-投放「投放计划」\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.994424", "step": 2, "page": "zhihu", "label": "a.HotSearchCard-itemLink", "selector": "a.HotSearchCard-itemLink", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.994424", "step": 2, "page": "zhihu", "label": "a.UserLink-link", "selector": "a.UserLink-link", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.994424", "step": 2, "page": "zhihu", "label": "a(新知答主)", "selector": "a[aria-label=\"新知答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.994424", "step": 2, "page": "zhihu", "label": "button.Button.FollowButton", "selector": "button.Button.FollowButton.FEfUrdfMIKpQDJDqkjte", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.995469", "step": 2, "page": "zhihu", "label": "a(互联网话题下的优秀答主)", "selector": "a[aria-label=\"互联网话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.995469", "step": 2, "page": "zhihu", "label": "a(电子商务话题下的优秀答主)", "selector": "a[aria-label=\"电子商务话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.995469", "step": 2, "page": "zhihu", "label": "a(中南林业科技大学 动物学硕士)", "selector": "a[aria-label=\"中南林业科技大学 动物学硕士\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.995469", "step": 2, "page": "zhihu", "label": "a(露营话题下的优秀答主)", "selector": "a[aria-label=\"露营话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.995469", "step": 2, "page": "zhihu", "label": "a(知势榜影响力榜经济与管理领域上榜答主)", "selector": "a[aria-label=\"知势榜影响力榜经济与管理领域上榜答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:24.996971", "step": 2, "page": "zhihu", "label": "button(回到顶部)", "selector": "button[aria-label=\"回到顶部\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:32.343097", "step": 3, "page": "zhihu", "label": "input[placeholder=怎么赚100万]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:32.344372", "step": 3, "page": "zhihu", "label": "button(赞同 3204)", "selector": "button[aria-label=\"赞同 3204\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:32.344372", "step": 3, "page": "zhihu", "label": "a.internal", "selector": "a.internal", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:32.345371", "step": 3, "page": "zhihu", "label": "button(赞同 190)", "selector": "button[aria-label=\"赞同 190\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:32.345371", "step": 3, "page": "zhihu", "label": "a.Banner-link", "selector": "a.Banner-link", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:37.635134", "step": 4, "page": "zhihu", "label": "input[placeholder=信息差赚钱的门路]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:28:43.533230", "step": 5, "page": "zhihu_write", "label": "a(知乎)", "selector": "a[aria-label=\"知乎\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.533230", "step": 5, "page": "zhihu_write", "label": "button.Button.AppHeader-profileEntry", "selector": "#Popover9-toggle", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.534249", "step": 5, "page": "zhihu_write", "label": "button(清除格式)", "selector": "button[aria-label=\"清除格式\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.534249", "step": 5, "page": "zhihu_write", "label": "button(标题)", "selector": "button[aria-label=\"标题\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.534249", "step": 5, "page": "zhihu_write", "label": "button(加粗)", "selector": "button[aria-label=\"加粗\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.534249", "step": 5, "page": "zhihu_write", "label": "button(斜体)", "selector": "button[aria-label=\"斜体\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.534249", "step": 5, "page": "zhihu_write", "label": "button(列表)", "selector": "button[aria-label=\"列表\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.535691", "step": 5, "page": "zhihu_write", "label": "button(目录)", "selector": "button[aria-label=\"目录\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.535691", "step": 5, "page": "zhihu_write", "label": "button(引用)", "selector": "button[aria-label=\"引用\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.535691", "step": 5, "page": "zhihu_write", "label": "button(分割线)", "selector": "button[aria-label=\"分割线\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.535691", "step": 5, "page": "zhihu_write", "label": "button(代码块)", "selector": "button[aria-label=\"代码块\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.536699", "step": 5, "page": "zhihu_write", "label": "button(注释)", "selector": "button[aria-label=\"注释\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.536699", "step": 5, "page": "zhihu_write", "label": "button(图片)", "selector": "button[aria-label=\"图片\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.536699", "step": 5, "page": "zhihu_write", "label": "button(视频)", "selector": "button[aria-label=\"视频\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.536699", "step": 5, "page": "zhihu_write", "label": "button(链接)", "selector": "button[aria-label=\"链接\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.536699", "step": 5, "page": "zhihu_write", "label": "button(公式)", "selector": "button[aria-label=\"公式\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.537853", "step": 5, "page": "zhihu_write", "label": "button(表格)", "selector": "button[aria-label=\"表格\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.537853", "step": 5, "page": "zhihu_write", "label": "button(附件)", "selector": "button[aria-label=\"附件\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.537853", "step": 5, "page": "zhihu_write", "label": "button(导入)", "selector": "button[aria-label=\"导入\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.537853", "step": 5, "page": "zhihu_write", "label": "button(草稿备份)", "selector": "button[aria-label=\"草稿备份\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.537853", "step": 5, "page": "zhihu_write", "label": "button(创作助手)", "selector": "button[aria-label=\"创作助手\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.537853", "step": 5, "page": "zhihu_write", "label": "textarea[placeholder=请输入标题（最多 100 个字）]", "selector": "textarea[placeholder=\"请输入标题（最多 100 个字）\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.539042", "step": 5, "page": "zhihu_write", "label": "button(清空检测列表)", "selector": "button[aria-label=\"清空检测列表\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.539042", "step": 5, "page": "zhihu_write", "label": "button(关闭创作助手)", "selector": "button[aria-label=\"关闭创作助手\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:28:43.539042", "step": 5, "page": "zhihu_write", "label": "button(回到顶部)", "selector": "button[aria-label=\"回到顶部\"]", "url": "https://zhuanlan.zhihu.com/write"}
+{"ts": "2026-07-22T18:29:15.090622", "step": 8, "page": "zhihu_article", "label": "a(知乎)", "selector": "a[aria-label=\"知乎\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.090622", "step": 8, "page": "zhihu_article", "label": "button.Button.AppHeader-profileEntry", "selector": "#Popover9-toggle", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.090622", "step": 8, "page": "zhihu_article", "label": "button(清除格式)", "selector": "button[aria-label=\"清除格式\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(标题)", "selector": "button[aria-label=\"标题\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(加粗)", "selector": "button[aria-label=\"加粗\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(斜体)", "selector": "button[aria-label=\"斜体\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(列表)", "selector": "button[aria-label=\"列表\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(目录)", "selector": "button[aria-label=\"目录\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(引用)", "selector": "button[aria-label=\"引用\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.091767", "step": 8, "page": "zhihu_article", "label": "button(分割线)", "selector": "button[aria-label=\"分割线\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.093275", "step": 8, "page": "zhihu_article", "label": "button(代码块)", "selector": "button[aria-label=\"代码块\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.093275", "step": 8, "page": "zhihu_article", "label": "button(注释)", "selector": "button[aria-label=\"注释\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.093275", "step": 8, "page": "zhihu_article", "label": "button(图片)", "selector": "button[aria-label=\"图片\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.093275", "step": 8, "page": "zhihu_article", "label": "button(视频)", "selector": "button[aria-label=\"视频\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.093275", "step": 8, "page": "zhihu_article", "label": "button(链接)", "selector": "button[aria-label=\"链接\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.093275", "step": 8, "page": "zhihu_article", "label": "button(公式)", "selector": "button[aria-label=\"公式\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "button(表格)", "selector": "button[aria-label=\"表格\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "button(附件)", "selector": "button[aria-label=\"附件\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "button(导入)", "selector": "button[aria-label=\"导入\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "button(草稿备份)", "selector": "button[aria-label=\"草稿备份\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "button(创作助手)", "selector": "button[aria-label=\"创作助手\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "textarea[placeholder=请输入标题（最多 100 个字）]", "selector": "textarea[placeholder=\"请输入标题（最多 100 个字）\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.094311", "step": 8, "page": "zhihu_article", "label": "button.Button.InputLike", "selector": "#Popover6-toggle", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.095727", "step": 8, "page": "zhihu_article", "label": "button.Button.Button--withIcon", "selector": "button.Button.Button--withIcon.Button--withLabel", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:29:15.095727", "step": 8, "page": "zhihu_article", "label": "button(回到顶部)", "selector": "button[aria-label=\"回到顶部\"]", "url": "https://zhuanlan.zhihu.com/p/2063329693789696280/edit"}
+{"ts": "2026-07-22T18:43:11.602807", "step": 2, "page": "zhihu", "label": "input[placeholder=田曦薇青风吹又生定妆]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.602807", "step": 2, "page": "zhihu", "label": "button(赞同 1)", "selector": "button[aria-label=\"赞同 1\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.603817", "step": 2, "page": "zhihu", "label": "button(赞同 45)", "selector": "button[aria-label=\"赞同 45\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.603817", "step": 2, "page": "zhihu", "label": "button(赞同 5065)", "selector": "button[aria-label=\"赞同 5065\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.603817", "step": 2, "page": "zhihu", "label": "button(赞同 214)", "selector": "button[aria-label=\"赞同 214\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.604866", "step": 2, "page": "zhihu", "label": "button(赞同 42)", "selector": "button[aria-label=\"赞同 42\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.604866", "step": 2, "page": "zhihu", "label": "a(宁波维特网络科技有限公司 法定代表人)", "selector": "a[aria-label=\"宁波维特网络科技有限公司 法定代表人\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.604866", "step": 2, "page": "zhihu", "label": "a(创业话题下的优秀答主)", "selector": "a[aria-label=\"创业话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:43:11.604866", "step": 2, "page": "zhihu", "label": "a(科技等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"科技等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.981073", "step": 2, "page": "zhihu", "label": "input[placeholder=苹果拟推出月租iPhone]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.982083", "step": 2, "page": "zhihu", "label": "button(赞同 0)", "selector": "button[aria-label=\"赞同 0\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.982083", "step": 2, "page": "zhihu", "label": "button(赞同 332)", "selector": "button[aria-label=\"赞同 332\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.982083", "step": 2, "page": "zhihu", "label": "button(赞同 79)", "selector": "button[aria-label=\"赞同 79\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.982083", "step": 2, "page": "zhihu", "label": "button(赞同 2096)", "selector": "button[aria-label=\"赞同 2096\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.983592", "step": 2, "page": "zhihu", "label": "button(赞同 106)", "selector": "button[aria-label=\"赞同 106\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.983592", "step": 2, "page": "zhihu", "label": "a(零一万物 CEO、创新工场董事长)", "selector": "a[aria-label=\"零一万物 CEO、创新工场董事长\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.983592", "step": 2, "page": "zhihu", "label": "a(互联网行业 从业人员)", "selector": "a[aria-label=\"互联网行业 从业人员\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.984806", "step": 2, "page": "zhihu", "label": "a(交互设计等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"交互设计等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.984806", "step": 2, "page": "zhihu", "label": "a(笔记本电脑等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"笔记本电脑等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.984806", "step": 2, "page": "zhihu", "label": "a(游戏开发等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"游戏开发等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.984806", "step": 2, "page": "zhihu", "label": "a(科技等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"科技等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T18:46:29.984806", "step": 2, "page": "zhihu", "label": "a(已认证机构号)", "selector": "a[aria-label=\"已认证机构号\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.818738", "step": 2, "page": "zhihu", "label": "input[placeholder=最新中国500强]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.820024", "step": 2, "page": "zhihu", "label": "button(赞同 5)", "selector": "button[aria-label=\"赞同 5\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.820024", "step": 2, "page": "zhihu", "label": "button(赞同 4)", "selector": "button[aria-label=\"赞同 4\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.820024", "step": 2, "page": "zhihu", "label": "button(赞同 137)", "selector": "button[aria-label=\"赞同 137\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.820024", "step": 2, "page": "zhihu", "label": "button(赞同 27)", "selector": "button[aria-label=\"赞同 27\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.821293", "step": 2, "page": "zhihu", "label": "button(赞同 65)", "selector": "button[aria-label=\"赞同 65\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.821293", "step": 2, "page": "zhihu", "label": "a(摄影等 4 个话题下的优秀答主)", "selector": "a[aria-label=\"摄影等 4 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.821293", "step": 2, "page": "zhihu", "label": "a(互联网行业 COO)", "selector": "a[aria-label=\"互联网行业 COO\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.821293", "step": 2, "page": "zhihu", "label": "a(机器学习等 5 个话题下的优秀答主)", "selector": "a[aria-label=\"机器学习等 5 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.822370", "step": 2, "page": "zhihu", "label": "a(蚂蚁科技集团股份有限公司 员工)", "selector": "a[aria-label=\"蚂蚁科技集团股份有限公司 员工\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.822370", "step": 2, "page": "zhihu", "label": "a(游戏开发等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"游戏开发等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.822370", "step": 2, "page": "zhihu", "label": "a(文学话题下的优秀答主)", "selector": "a[aria-label=\"文学话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.822370", "step": 2, "page": "zhihu", "label": "a(基金话题下的优秀答主)", "selector": "a[aria-label=\"基金话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:30.822370", "step": 2, "page": "zhihu", "label": "a(心理咨询等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"心理咨询等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:42.965966", "step": 3, "page": "zhihu", "label": "input[placeholder=京东入局美食综艺]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T19:08:42.968220", "step": 3, "page": "zhihu", "label": "button(赞同 672)", "selector": "button[aria-label=\"赞同 672\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.195690", "step": 2, "page": "zhihu", "label": "input[placeholder=年赚50万的4个暴利冷门生意]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.196687", "step": 2, "page": "zhihu", "label": "button(赞同 3.1 万)", "selector": "button[aria-label=\"赞同 3.1 万\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.196687", "step": 2, "page": "zhihu", "label": "button(赞同 8)", "selector": "button[aria-label=\"赞同 8\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.196687", "step": 2, "page": "zhihu", "label": "button(赞同 703)", "selector": "button[aria-label=\"赞同 703\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.198102", "step": 2, "page": "zhihu", "label": "button(赞同 75)", "selector": "button[aria-label=\"赞同 75\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.198102", "step": 2, "page": "zhihu", "label": "a(电影制作等 3 个话题下的优秀答主)", "selector": "a[aria-label=\"电影制作等 3 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.198102", "step": 2, "page": "zhihu", "label": "a(电子竞技话题下的优秀答主)", "selector": "a[aria-label=\"电子竞技话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.199101", "step": 2, "page": "zhihu", "label": "a(航空话题下的优秀答主)", "selector": "a[aria-label=\"航空话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:06:57.199101", "step": 2, "page": "zhihu", "label": "a(Android 手机等 5 个话题下的优秀答主)", "selector": "a[aria-label=\"Android 手机等 5 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:07:06.248377", "step": 3, "page": "zhihu", "label": "input[placeholder=Bin状态不太好]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:07:06.249440", "step": 3, "page": "zhihu", "label": "button(赞同 39)", "selector": "button[aria-label=\"赞同 39\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:07:06.249440", "step": 3, "page": "zhihu", "label": "button(赞同 3)", "selector": "button[aria-label=\"赞同 3\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:07:06.249440", "step": 3, "page": "zhihu", "label": "button(赞同 1177)", "selector": "button[aria-label=\"赞同 1177\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:01.241539", "step": 8, "page": "zhihu_article", "label": "button(清空检测列表)", "selector": "button[aria-label=\"清空检测列表\"]", "url": "https://zhuanlan.zhihu.com/p/2063399813824132231/edit"}
+{"ts": "2026-07-22T23:08:01.242601", "step": 8, "page": "zhihu_article", "label": "button(关闭创作助手)", "selector": "button[aria-label=\"关闭创作助手\"]", "url": "https://zhuanlan.zhihu.com/p/2063399813824132231/edit"}
+{"ts": "2026-07-22T23:08:20.540600", "step": 11, "page": "zhihu_article", "label": "button.Button.FEfUrdfMIKpQDJDqkjte", "selector": "button.Button.FEfUrdfMIKpQDJDqkjte.Button--primary", "url": "https://zhuanlan.zhihu.com/p/2063399813824132231/edit"}
+{"ts": "2026-07-22T23:08:36.337430", "step": 12, "page": "zhihu_article", "label": "a(边栏锚点)", "selector": "a[aria-label=\"边栏锚点\"]", "url": "https://zhuanlan.zhihu.com/p/2063399813824132231"}
+{"ts": "2026-07-22T23:08:44.029771", "step": 13, "page": "zhihu", "label": "input[placeholder=曝Bin休息一两周]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.029771", "step": 13, "page": "zhihu", "label": "button(10条通知)", "selector": "button[aria-label=\"10条通知\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.030768", "step": 13, "page": "zhihu", "label": "button(赞同 69)", "selector": "button[aria-label=\"赞同 69\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.030768", "step": 13, "page": "zhihu", "label": "button(赞同 1212)", "selector": "button[aria-label=\"赞同 1212\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.030768", "step": 13, "page": "zhihu", "label": "button(赞同 8273)", "selector": "button[aria-label=\"赞同 8273\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.030768", "step": 13, "page": "zhihu", "label": "button(赞同 466)", "selector": "button[aria-label=\"赞同 466\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.031764", "step": 13, "page": "zhihu", "label": "button(赞同 996)", "selector": "button[aria-label=\"赞同 996\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.032266", "step": 13, "page": "zhihu", "label": "a(职场等 2 个话题下的优秀答主)", "selector": "a[aria-label=\"职场等 2 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.032266", "step": 13, "page": "zhihu", "label": "a(手机话题下的优秀答主)", "selector": "a[aria-label=\"手机话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.032266", "step": 13, "page": "zhihu", "label": "a(游戏开发等 4 个话题下的优秀答主)", "selector": "a[aria-label=\"游戏开发等 4 个话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:44.032266", "step": 13, "page": "zhihu", "label": "a(社交心理话题下的优秀答主)", "selector": "a[aria-label=\"社交心理话题下的优秀答主\"]", "url": "https://www.zhihu.com/"}
+{"ts": "2026-07-22T23:08:51.321931", "step": 14, "page": "zhihu_search", "label": "a(知乎)", "selector": "a[aria-label=\"知乎\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.321931", "step": 14, "page": "zhihu_search", "label": "input[placeholder=曝Bin休息一两周]", "selector": "#Popover1-toggle", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.323279", "step": 14, "page": "zhihu_search", "label": "button(创作)", "selector": "button[aria-label=\"创作\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.323279", "step": 14, "page": "zhihu_search", "label": "button(10条通知)", "selector": "button[aria-label=\"10条通知\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.323279", "step": 14, "page": "zhihu_search", "label": "button(8条私信)", "selector": "button[aria-label=\"8条私信\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.323279", "step": 14, "page": "zhihu_search", "label": "a.Tabs-link", "selector": "a.Tabs-link", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.324333", "step": 14, "page": "zhihu_search", "label": "input[placeholder=搜索你感兴趣的内容…]", "selector": "input[placeholder=\"搜索你感兴趣的内容…\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.324333", "step": 14, "page": "zhihu_search", "label": "button.Button.AppHeader-profileEntry", "selector": "#Popover3-toggle", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.324333", "step": 14, "page": "zhihu_search", "label": "button(返回首页)", "selector": "button[aria-label=\"返回首页\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.324333", "step": 14, "page": "zhihu_search", "label": "button(关闭提示)", "selector": "button[aria-label=\"关闭提示\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.324333", "step": 14, "page": "zhihu_search", "label": "a.HotSearchCard-itemLink", "selector": "a.HotSearchCard-itemLink", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:08:51.325338", "step": 14, "page": "zhihu_search", "label": "button(回到顶部)", "selector": "button[aria-label=\"回到顶部\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.127606", "step": 15, "page": "zhihu_search", "label": "button.Button.ContentItem-more", "selector": "button.Button.ContentItem-more.FEfUrdfMIKpQDJDqkjte", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.128683", "step": 15, "page": "zhihu_search", "label": "button(赞同 0)", "selector": "button[aria-label=\"赞同 0\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.129752", "step": 15, "page": "zhihu_search", "label": "button(反对)", "selector": "button[aria-label=\"反对\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.130828", "step": 15, "page": "zhihu_search", "label": "button.Button.ContentItem-action", "selector": "button.Button.ContentItem-action.FEfUrdfMIKpQDJDqkjte", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.131903", "step": 15, "page": "zhihu_search", "label": "button(赞同 2)", "selector": "button[aria-label=\"赞同 2\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.133190", "step": 15, "page": "zhihu_search", "label": "button(赞同 1)", "selector": "button[aria-label=\"赞同 1\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.133190", "step": 15, "page": "zhihu_search", "label": "button(赞同 4)", "selector": "button[aria-label=\"赞同 4\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.134274", "step": 15, "page": "zhihu_search", "label": "button(赞同 7)", "selector": "button[aria-label=\"赞同 7\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:00.134274", "step": 15, "page": "zhihu_search", "label": "button(赞同 5)", "selector": "button[aria-label=\"赞同 5\"]", "url": "https://www.zhihu.com/search?type=content&q=2026%E5%B9%B4AI%20Agent%E5%8F%91%E5%B1%95%E8%B6%8B%E5%8A%BF"}
+{"ts": "2026-07-22T23:09:12.817238", "step": 16, "page": "zhihu_article", "label": "input[placeholder=ai算法方向]", "selector": "#Popover1-toggle", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.817238", "step": 16, "page": "zhihu_article", "label": "button(创作)", "selector": "button[aria-label=\"创作\"]", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.818235", "step": 16, "page": "zhihu_article", "label": "button(10条通知)", "selector": "button[aria-label=\"10条通知\"]", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.818235", "step": 16, "page": "zhihu_article", "label": "button(8条私信)", "selector": "button[aria-label=\"8条私信\"]", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.819696", "step": 16, "page": "zhihu_article", "label": "a.UserLink-link", "selector": "a.UserLink-link", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.819696", "step": 16, "page": "zhihu_article", "label": "a.RichContent-EntityWord", "selector": "a.RichContent-EntityWord", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.819696", "step": 16, "page": "zhihu_article", "label": "button(赞同 0)", "selector": "button[aria-label=\"赞同 0\"]", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.820696", "step": 16, "page": "zhihu_article", "label": "button.Button.ContentItem-action", "selector": "button.Button.ContentItem-action.BottomActions-CommentBtn", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.820696", "step": 16, "page": "zhihu_article", "label": "button(已收藏)", "selector": "button[aria-label=\"已收藏\"]", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.820696", "step": 16, "page": "zhihu_article", "label": "a.NumberBoard-item", "selector": "a.NumberBoard-item", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:12.820696", "step": 16, "page": "zhihu_article", "label": "a.HotSearchCard-itemLink", "selector": "a.HotSearchCard-itemLink", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
+{"ts": "2026-07-22T23:09:19.778186", "step": 17, "page": "zhihu_article", "label": "button.Button.Button--plain", "selector": "button.Button.Button--plain.Button--withIcon", "url": "https://zhuanlan.zhihu.com/p/2057492824233448343"}
