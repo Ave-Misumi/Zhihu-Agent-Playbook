@@ -284,10 +284,12 @@ class AutoMemoryCollector:
             url = getattr(browser_state, "url", "") or ""
             dom = getattr(browser_state, "dom_state", None)
             if dom is None:
+                print(f"[AutoMemory] Step {step_num}: dom_state is None, skipping")
                 return
 
             selector_map = getattr(dom, "selector_map", None)
             if not selector_map:
+                print(f"[AutoMemory] Step {step_num}: selector_map empty, skipping")
                 return
 
             page = _url_to_page_name(url)
@@ -295,10 +297,13 @@ class AutoMemoryCollector:
             page_elements = playbook.get(page, {})
             starting_count = len(page_elements)
             saved_this_step = 0
+            skipped_count = 0
+            total_candidates = 0
 
             for idx, node in selector_map.items():
                 if not _is_valuable_element(node):
                     continue
+                total_candidates += 1
                 label = _element_label(node)
                 if not label:
                     continue
@@ -308,6 +313,7 @@ class AutoMemoryCollector:
 
                 # 不去重：同一 label 可能被多个不同元素使用；用 selector 作为 key
                 if label in page_elements:
+                    skipped_count += 1
                     continue  # 已存在则跳过
 
                 page_elements[label] = selector
@@ -334,6 +340,12 @@ class AutoMemoryCollector:
                     f"+{saved_this_step} new, "
                     f"total {len(page_elements)} (hit rate on this page: "
                     f"{starting_count}/{starting_count + saved_this_step} reused)"
+                )
+            else:
+                print(
+                    f"[AutoMemory] Step {step_num} | {page}: "
+                    f"0 new (candidates={total_candidates}, already_known={skipped_count}, "
+                    f"selector_map_size={len(selector_map)})"
                 )
 
         except Exception as e:
