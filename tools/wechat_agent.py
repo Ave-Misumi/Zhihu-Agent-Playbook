@@ -290,14 +290,28 @@ def _ensure_foreground(hwnd: int):
 # 页面分类
 # ═══════════════════════════════════════════
 
-def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]:
-    """根据 OCR 文字判断当前窗口类型。
+def _classify_page(ocr_results: list, img_w: int, img_h: int, img: 'np.ndarray | None' = None) -> tuple[str, str]:
+    """根据 OCR 文字 + 模板匹配判断当前窗口类型。
 
     Returns:
         (page_type, description)
-        page_type: "login" | "main" | "search_results" | "detail" | "chat" | "unknown"
+        page_type: "login" | "main" | "search_results" | "detail" | "chat" | "moments" | "unknown"
     """
     all_text = " ".join([t[0] for t in ocr_results])
+
+    # ── 优先：模板匹配主窗口侧边栏 ──
+    # 微信 PC 版侧边栏是图标+小文字，OCR 经常识别不到导航栏文字，
+    # 用 mainwindow.png 模板匹配最可靠
+    if img is not None:
+        try:
+            from .wechat_vision import find_template_center
+            tpl_path = Path(__file__).parent.parent / "assets" / "wechat_templates" / "mainwindow.png"
+            if tpl_path.exists():
+                center = find_template_center(img, tpl_path, confidence=0.6)
+                if center is not None:
+                    return "main", "微信主窗口（侧边栏匹配）"
+        except Exception:
+            pass
 
     # 登录面板
     if any(kw in all_text for kw in ["二维码", "扫码登录", "扫描二维码"]):
@@ -347,16 +361,30 @@ def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]
         return "chat", "聊天窗口"
 
     # 朋友圈/Moments 页面
-    # 特征1: 有朋友圈内容（点赞、评论、时间等），且没有「发送」按钮（主窗口才有）
-    moments_content = ["点赞", "评论", "封面", "相册", "昨天", "分钟前", "小时前", "刚刚", "天前"]
-    has_moments_content = sum(1 for kw in moments_content if kw in all_text) >= 2
-    # 朋友圈窗口通常没有底部输入框的「发送」按钮
+    # 朋友圈窗口特征：独立弹窗，无「发送」按钮，无主窗口导航词，内容是动态流
+    import re
     no_chat_input = "发送" not in all_text
-    if has_moments_content and no_chat_input:
+    no_main_nav = not any(kw in all_text for kw in ["通讯录", "聊天", "消息"])
+    is_standalone = no_chat_input and no_main_nav
+    # 朋友圈时间戳格式：X分钟前、X小时前、X时前、昨天、X天前、刚刚
+    has_moments_time = bool(
+        re.search(r'\d+分钟前', all_text)
+        or re.search(r'\d+小时前', all_text)
+        or re.search(r'\d+时前', all_text)
+        or re.search(r'\d+天前', all_text)
+        or any(kw in all_text for kw in ["昨天", "刚刚"])
+    )
+    # 朋友圈操作词
+    moments_ops = ["点赞", "评论", "封面", "相册", "拍一拍"]
+    has_moments_ops = any(kw in all_text for kw in moments_ops)
+    # 特征1: 有操作词 + 是独立窗口
+    if has_moments_ops and is_standalone:
         return "moments", "朋友圈"
-    # 特征2: 明确有「朋友圈」标题 + 时间词（朋友圈动态必有时间戳）
-    has_time = any(kw in all_text for kw in ["分钟前", "小时前", "昨天", "天前", "刚刚"])
-    if "朋友圈" in all_text and has_time and no_chat_input:
+    # 特征2: 有时间戳 + 是独立窗口（朋友圈正文不一定有操作词，但一定有时间戳）
+    if has_moments_time and is_standalone:
+        return "moments", "朋友圈"
+    # 特征3: 明确有「朋友圈」标题 + 时间词
+    if "朋友圈" in all_text and has_moments_time:
         return "moments", "朋友圈"
     # 兜底：明确有「朋友圈」标题 + 封面/相册
     if "朋友圈" in all_text and any(kw in all_text for kw in ["封面", "相册", "拍一拍"]):
@@ -402,7 +430,7 @@ def _observe() -> str:
     ocr_results = _ocr_image(img)
 
     # 页面分类
-    page_type, page_desc = _classify_page(ocr_results, img_w, img_h)
+    page_type, page_desc = _classify_page(ocr_results, img_w, img_h, img=img)
 
     # 收集可见文字（精选关键文字，去重、按置信度排序）
     # 只保留中高置信度文字，避免噪声项淹没 LLM
@@ -499,8 +527,7 @@ def _observe() -> str:
     elif page_type == "discovery":
         lines.append("【判断】在发现页，可以点击「朋友圈」进入。（注：微信 PC 版主窗口侧边栏通常直接有「朋友圈」，无需经过发现页）")
     elif page_type == "moments":
-        has_like = any(kw in " ".join(visible_texts) for kw in ["赞", "评论", "...", "⋯"])
-        lines.append("【判断】在朋友圈。每条动态右下角有「两个点」按钮（⋯），点击后弹出「点赞」和「评论」选项。要点赞请先点击「两个点」按钮，再点击「点赞」。（注意：不要滚动，第一条动态就在顶部）")
+        lines.append("【判断】在朋友圈。直接调用 wechat_like_moments_post(n=1) 给第一条点赞。不要用 wechat_click_text 找「赞」或「...」，它们是图标不是文字。")
     else:
         lines.append("【判断】未知页面，请根据可见文字判断当前状态。")
 
@@ -1418,7 +1445,7 @@ def wechat_like_moments_post(n: int = 1) -> str:
     # ── Step 1: 找第 n 条动态 ──
     # 朋友圈动态之间有时间戳分隔，用时间词定位每条动态
     ocr_results = _ocr_image(img)
-    time_keywords = ["分钟前", "小时前", "昨天", "天前", "刚刚"]
+    time_keywords = ["分钟前", "小时前", "时前", "昨天", "天前", "刚刚"]
 
     # 收集所有时间戳的位置（y 坐标），按 y 排序
     post_positions = []
@@ -1438,9 +1465,36 @@ def wechat_like_moments_post(n: int = 1) -> str:
     post_positions = sorted(set(post_positions))
 
     if not post_positions:
-        # 兜底：如果没有时间戳，假设第一条动态在页面中上部
-        print(f"[AGENT] like_moments: 未识别到时间戳，使用默认位置")
-        post_positions = [int(img_h * 0.4)]
+        # 没找到时间戳 → 向下滚动一次再试
+        print(f"[AGENT] like_moments: 未识别到时间戳，向下滚动一次再试")
+        cx = int(img_w * 0.5)
+        cy = int(img_h * 0.5)
+        sx, sy = _window_client_to_screen(hwnd, cx, cy)
+        pyautogui.moveTo(sx, sy, duration=0.05)
+        pyautogui.scroll(-300)
+        time.sleep(0.8)
+
+        # 重新截图 + OCR
+        img = capture_window(hwnd, client_only=True)
+        if img is None:
+            return "❌ 滚动后截图失败"
+        img_h, img_w = img.shape[:2]
+        ocr_results = _ocr_image(img)
+        for text, bbox, conf in ocr_results:
+            if conf < 0.1:
+                continue
+            for kw in time_keywords:
+                if kw in text:
+                    ys = [p[1] for p in bbox]
+                    cy = int(sum(ys) / len(ys))
+                    post_positions.append(cy)
+                    debug_times.append((text, conf, cy))
+                    break
+        print(f"[AGENT] like_moments: 滚动后时间戳: {debug_times}")
+        post_positions = sorted(set(post_positions))
+
+        if not post_positions:
+            return f"❌ 滚动后仍未识别到时间戳，无法定位朋友圈动态\n\n{_observe()}"
 
     if n > len(post_positions):
         return f"⚠️ 只找到 {len(post_positions)} 条动态，无法点赞第 {n} 条"
