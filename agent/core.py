@@ -21,6 +21,7 @@ from tools.human_in_loop import ask_human_for_intervention
 from tools.zhihu_body import zhihu_body_input, zhihu_body_input_with_image
 from tools.playbook import get_playbook_selector, execute_playwright_action
 from tools.auto_memory import create_auto_memory_callback
+from tools.playbook_intercept import apply_all_patches
 from tools.wps import wps_create_document_and_export_pdf
 from tools.wps_playbook import get_wps_template
 from tools.wechat_agent import (
@@ -42,10 +43,11 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 - click / input / navigate / scroll / wait / evaluate:浏览器基础操作
 - **get_playbook_selector(page_name, element_description)**:查询操作手册,获取已知元素的CSS选择器。page_name 取值:zhihu/zhihu_write/zhihu_article/zhihu_search/zhihu_login。element_description 用自然语言描述你要操作的元素(如"发布按钮"、"加粗"、"标题输入框")。
 - **execute_playwright_action(selector, action, text?)**:用CSS选择器直接执行操作。action=click/fill/type,text仅fill/type时传。命中手册后比click(index)更快更可靠！
-- zhihu_body_input_with_image(html_content="<p>正文</p>", article_topic="标题"):**正文输入+配图一步完成！** 根据标题和正文内容自动生成与内容相关的SVG配图,转为PNG后通过剪贴板粘贴到正文中。这是正文和配图的唯一入口！
+- zhihu_body_input_with_image(html_content="<p>正文</p>", article_topic="标题"):**仅用于写文章正文！** 在知乎写作编辑器(contenteditable)中输入HTML正文并自动生成SVG配图→PNG→Ctrl+V粘贴。⚠️ 评论/搜索/标题/私信等场景禁止使用此工具！
 - ask_human_for_intervention:遇到验证码/异常时暂停求助
 - 文章正文由你根据主题自行创作(100~200 字)
 - 配图:调用 zhihu_body_input_with_image 时自动生成,无需单独配图
+- **评论/回复**:用 click 点评论框 → 用 input 工具输入文字 → 用 click 点发送,禁止调 zhihu_body_input_with_image
 
 ## 操作手册加速（重要！）
 系统已缓存知乎各页面的元素选择器（操作手册）。**遇到需要点击/输入的场景，优先查手册！**
@@ -335,10 +337,12 @@ async def create_zhihu_agent(task: str) -> Agent:
     """知乎链路:纯LLM决策模式
     
     只提供浏览器基础操作 + 通用工具,所有决策由LLM自行完成。
-    不注册任何专用RPA工具(如ensure_zhihu_logged_in/zhihu_editor_input_title等)。
+    应用 Playbook Interception Layer 1+2:
+      L1: 执行层拦截 click(index) → 自动查 playbook 用 CSS selector 直接点击
+      L2: 规则引擎自动关闭创作助手弹窗,节省 LLM 步骤
     """
     set_agent_mode("zhihu")
-    return Agent(
+    agent = Agent(
         task=task,
         llm=get_llm(),
         browser_session=BrowserSession(browser_profile=_make_browser_profile(headless=False)),
@@ -349,6 +353,10 @@ async def create_zhihu_agent(task: str) -> Agent:
         use_vision=False,
         register_new_step_callback=create_auto_memory_callback(),
     )
+    # 应用 Playbook Interception Layer 1 + Layer 2
+    enhanced_callback = apply_all_patches(agent)
+    agent.register_new_step_callback = enhanced_callback
+    return agent
 
 
 # ═══════════════════════════════════════════════════════════
