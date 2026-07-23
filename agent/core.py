@@ -35,6 +35,10 @@ from tools.wechat_agent import (
     wechat_like_moments_post,
 )
 
+# 让通用浏览器链路也能调用 WPS 生成 PDF 报告
+wps_create_document_and_export_pdf_langchain_sync = wps_create_document_and_export_pdf
+from tools.wps import wps_create_document_and_export_pdf as browser_wps_create_document_and_export_pdf
+
 
 # ═══════════════════════════════════════════════════════════
 # 知乎 Agent 知识库(保持 browser-use)
@@ -319,6 +323,51 @@ WECHAT_SYSTEM_PROMPT = """你是微信桌面自动化助手。你在微信窗口
 
 
 # ═══════════════════════════════════════════════════════════
+# 通用浏览器 Agent 知识库(支持任意网站)
+# ═══════════════════════════════════════════════════════════
+
+BROWSER_SYSTEM_PROMPT = """你是一个通用浏览器自动化助手,可以用浏览器基础操作完成各种网页任务。
+
+## 可用能力
+- click / input / navigate / scroll / wait / evaluate:浏览器基础操作
+- ask_human_for_intervention:遇到验证码/异常时暂停求助
+- wps_create_document_and_export_pdf(title, body_md, output_dir=""): 当任务要求导出文档/PDF报告时调用此工具生成 PDF。
+
+## 工作方式
+1. 根据用户任务,navigate 到目标网站
+2. 使用基础操作(click/input/scroll等)与页面交互
+3. 需要提取信息时,用 evaluate 执行 JavaScript 获取数据
+4. 任务完成后调用 done(success=true)
+
+## 信息提取技巧
+- 用 evaluate 执行 `document.querySelectorAll('选择器')` 获取元素列表
+- 用 evaluate 执行 `document.body.innerText` 获取页面全部文字
+- 用 evaluate 执行 `Array.from(document.querySelectorAll('选择器')).map(el => ({text: el.innerText, href: el.href}))` 提取结构化数据
+- 翻页后 wait 2秒等页面加载,再提取新数据
+
+## 翻页策略
+- 先提取当前页数据,记录已提取的内容(每页保存到变量)
+- 找"下一页"按钮或页码,点击翻页
+- 翻页后对比新内容,避免重复提取
+- 到达指定页数或没有下一页时停止
+
+## 报告生成(PDF)
+- 当用户要求"导出PDF报告/总结报告"时,在分析完数据后:
+  1. 将总结内容组织成 Markdown 正文(body_md),包含标题、摘要、分章节分析、结论
+  2. 调用 wps_create_document_and_export_pdf(title="报告标题", body_md=markdown正文, output_dir="报告保存目录(可选,默认桌面)")
+  3. 工具会返回生成的 PDF 文件路径
+  4. 然后调用 done(success=true) 结束
+
+## 行为准则
+- 读懂用户的自然语言,拆解为先后步骤,逐一执行
+- 每进入新页面后 wait 2秒,观察是否有弹窗,有关闭掉再继续
+- 同一个 wait 操作不要连续超过 2 次
+- 所有任务完成后调用 done(success=true),不要继续浏览
+- 遇到登录弹窗/验证码时调用 ask_human_for_intervention
+"""
+
+
+# ═══════════════════════════════════════════════════════════
 # 知乎工具注册(browser-use)
 # ═══════════════════════════════════════════════════════════
 
@@ -382,28 +431,57 @@ def create_zhihu_tools() -> Tools:
 
 
 async def create_zhihu_agent(task: str) -> Agent:
-    """知乎链路:纯LLM决策模式
+    """知乎链路: 已重定向为通用浏览器链路
     
-    只提供浏览器基础操作 + 通用工具,所有决策由LLM自行完成。
-    应用 Playbook Interception Layer 1+2:
-      L1: 执行层拦截 click(index) → 自动查 playbook 用 CSS selector 直接点击
-      L2: 规则引擎自动关闭创作助手弹窗,节省 LLM 步骤
+    知乎/BOSS直聘/任意网站均可复用同一套 browser-use 浏览器 Agent。
+    所有决策由 LLM 自行完成，保留 playbook 拦截以加速知乎特定元素。
     """
-    set_agent_mode("zhihu")
+    return await create_browser_agent(
+        task=task,
+        mode="zhihu",
+        system_prompt=ZHIHU_SYSTEM_PROMPT,
+        tools=create_zhihu_tools(),
+        apply_playbook=True,
+    )
+
+
+def create_browser_tools() -> Tools:
+    """通用浏览器链路:基础浏览器操作 + 人工干预 + WPS导出"""
+    tools = Tools()
+    tools.registry.action(
+        description="遇到验证码、登录卡住或未知异常时暂停等待人工干预。"
+    )(ask_human_for_intervention)
+    tools.registry.action(
+        description="启动 WPS 新建文档并导出 PDF。传入 title(标题)、body_md(Markdown 正文)、output_dir(输出目录,可选,默认桌面)。"
+    )(wps_create_document_and_export_pdf)
+    return tools
+
+
+async def create_browser_agent(
+    task: str,
+    mode: str = "browser",
+    system_prompt: str | None = None,
+    tools: Tools | None = None,
+    apply_playbook: bool = False,
+) -> Agent:
+    """通用浏览器链路:支持任意网站的浏览器自动化
+    
+    只提供浏览器基础操作 + 少量通用工具,所有决策由 LLM 自行完成。
+    """
+    set_agent_mode(mode)
     agent = Agent(
         task=task,
         llm=get_llm(),
         browser_session=BrowserSession(browser_profile=_make_browser_profile(headless=False)),
-        tools=create_zhihu_tools(),
-        extend_system_message=ZHIHU_SYSTEM_PROMPT,
-        max_steps=40,
+        tools=tools if tools is not None else create_browser_tools(),
+        extend_system_message=system_prompt if system_prompt is not None else BROWSER_SYSTEM_PROMPT,
+        max_steps=50,
         llm_timeout=180,
         use_vision=False,
-        register_new_step_callback=create_auto_memory_callback(),
     )
-    # 应用 Playbook Interception Layer 1 + Layer 2
-    enhanced_callback = apply_all_patches(agent)
-    agent.register_new_step_callback = enhanced_callback
+    if apply_playbook:
+        enhanced_callback = apply_all_patches(agent)
+        agent.register_new_step_callback = enhanced_callback
     return agent
 
 

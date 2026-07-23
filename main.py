@@ -13,6 +13,11 @@
 import os
 import sys
 import asyncio
+import io
+
+# 强制 PowerShell/CMD 下的 Python 使用 UTF-8 输出,避免 emoji 中文打印时 GBK 报错
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 os.environ["BROWSER_USE_DISABLE_EXTENSIONS"] = "true"
 
@@ -27,12 +32,22 @@ WPS_KEYWORDS = [
 WECHAT_KEYWORDS = [
     "微信", "服务号", "公众号", "发私信", "关注",
 ]
+BROWSER_KEYWORDS = [
+    "boss", "Boss", "BOSS", "直聘",
+    "打开网站", "打开网页", "浏览器",
+    "搜索", "爬取", "抓取", "分析",
+    "淘宝", "京东", "天猫", "拼多多",
+    "抖音", "快手", "b站", "B站",
+]
 
 def _route_intent(user_task: str) -> str:
     """根据用户输入关键词路由到对应链路"""
     # 微信优先（关键词更具体）
     if any(kw in user_task for kw in WECHAT_KEYWORDS):
         return "wechat"
+    # 浏览器类任务其次（关键词与 WPS 可能重叠，如"导出PDF"）
+    if any(kw in user_task for kw in BROWSER_KEYWORDS):
+        return "browser"
     if any(kw in user_task for kw in WPS_KEYWORDS):
         return "wps"
     return "zhihu"
@@ -86,6 +101,36 @@ async def run_wps(user_task: str):
             print(f"==> {last.content[:300]}")
         print(f"{'='*60}\n")
 
+    # Token 使用统计（LangChain ReAct Agent）
+    print(f"\n{'='*60}")
+    print(f"📊 Token 使用统计")
+    print(f"{'='*60}")
+    total_prompt = 0
+    total_completion = 0
+    total_tokens = 0
+    for msg in msgs:
+        # LangChain AIMessage / ToolMessage 可能携带 usage_metadata
+        um = getattr(msg, "usage_metadata", None)
+        if um and isinstance(um, dict):
+            total_prompt += um.get("input_tokens", 0) or um.get("prompt_tokens", 0)
+            total_completion += um.get("output_tokens", 0) or um.get("completion_tokens", 0)
+            total_tokens += um.get("total_tokens", 0)
+        # 部分 provider 放在 response_metadata
+        rm = getattr(msg, "response_metadata", None)
+        if rm and isinstance(rm, dict):
+            tu = rm.get("token_usage", {})
+            if tu:
+                total_prompt += tu.get("prompt_tokens", 0)
+                total_completion += tu.get("completion_tokens", 0)
+                total_tokens += tu.get("total_tokens", 0)
+    if total_tokens > 0:
+        print(f"  输入 tokens:  {total_prompt:,}")
+        print(f"  输出 tokens:  {total_completion:,}")
+        print(f"  总 tokens:    {total_tokens:,}")
+    else:
+        print("  未获取到 token 统计（当前 LLM provider 未返回 usage 信息）")
+    print(f"{'='*60}\n")
+
 
 async def run_wechat(user_task: str):
     from agent.core import create_wechat_agent
@@ -99,6 +144,7 @@ async def run_wechat(user_task: str):
 
     step = 0
     last_was_tool: bool = False
+    all_messages = []  # 收集全部消息用于 token 统计
     async for chunk in agent_graph.astream(
         {"messages": [{"role": "user", "content": task}]},
         stream_mode="updates",
@@ -106,6 +152,7 @@ async def run_wechat(user_task: str):
         step += 1
         for node_name, node_output in chunk.items():
             msgs = node_output.get("messages", [])
+            all_messages.extend(msgs)
             for msg in msgs:
                 if hasattr(msg, "content") and msg.content:
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -145,6 +192,65 @@ async def run_wechat(user_task: str):
     print(f"==> Agent 执行完毕 (共 {step} 步)")
     print(f"{'='*60}\n")
 
+    # Token 使用统计（LangChain ReAct Agent）
+    print(f"\n{'='*60}")
+    print(f"📊 Token 使用统计")
+    print(f"{'='*60}")
+    total_prompt = 0
+    total_completion = 0
+    total_tokens = 0
+    for msg in all_messages:
+        # LangChain AIMessage / ToolMessage 可能携带 usage_metadata
+        um = getattr(msg, "usage_metadata", None)
+        if um and isinstance(um, dict):
+            total_prompt += um.get("input_tokens", 0) or um.get("prompt_tokens", 0)
+            total_completion += um.get("output_tokens", 0) or um.get("completion_tokens", 0)
+            total_tokens += um.get("total_tokens", 0)
+        # 部分 provider 放在 response_metadata
+        rm = getattr(msg, "response_metadata", None)
+        if rm and isinstance(rm, dict):
+            tu = rm.get("token_usage", {})
+            if tu:
+                total_prompt += tu.get("prompt_tokens", 0)
+                total_completion += tu.get("completion_tokens", 0)
+                total_tokens += tu.get("total_tokens", 0)
+    if total_tokens > 0:
+        print(f"  输入 tokens:  {total_prompt:,}")
+        print(f"  输出 tokens:  {total_completion:,}")
+        print(f"  总 tokens:    {total_tokens:,}")
+    else:
+        print("  未获取到 token 统计（当前 LLM provider 未返回 usage 信息）")
+    print(f"{'='*60}\n")
+
+
+async def run_browser(user_task: str):
+    from agent.core import create_browser_agent
+    agent = await create_browser_agent(user_task)
+    history = await agent.run()
+    
+    # Token 使用统计
+    print(f"\n{'='*60}")
+    print(f"📊 Token 使用统计")
+    print(f"{'='*60}")
+    usage = None
+    if history and history.usage:
+        usage = history.usage
+    else:
+        try:
+            usage = await agent.token_cost_service.get_usage_summary()
+        except Exception as e:
+            print(f"  无法获取 token 统计: {e}")
+    
+    if usage:
+        print(f"  输入 tokens:  {usage.total_prompt_tokens:,}")
+        if usage.total_prompt_cached_tokens > 0:
+            print(f"  缓存 tokens:  {usage.total_prompt_cached_tokens:,}")
+        print(f"  输出 tokens:  {usage.total_completion_tokens:,}")
+        print(f"  总 tokens:    {usage.total_tokens:,}")
+        if usage.total_cost and usage.total_cost > 0:
+            print(f"  总费用:       ${usage.total_cost:.4f}")
+    print(f"{'='*60}\n")
+
 
 async def main():
     args = sys.argv[1:]
@@ -164,6 +270,8 @@ async def main():
         await run_wechat(user_task)
     elif route == "wps":
         await run_wps(user_task)
+    elif route == "browser":
+        await run_browser(user_task)
     else:
         await run_zhihu(user_task)
 
