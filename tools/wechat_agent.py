@@ -290,14 +290,26 @@ def _ensure_foreground(hwnd: int):
 # 页面分类
 # ═══════════════════════════════════════════
 
-def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]:
-    """根据 OCR 文字判断当前窗口类型。
+def _classify_page(ocr_results: list, img_w: int, img_h: int, img: 'np.ndarray | None' = None) -> tuple[str, str]:
+    """根据 OCR 文字 + 模板匹配判断当前窗口类型。
+
+    当 img 不为 None 时，优先用 mainwindow.png 模板匹配判断主窗口。
 
     Returns:
         (page_type, description)
         page_type: "login" | "main" | "search_results" | "detail" | "chat" | "unknown"
     """
     all_text = " ".join([t[0] for t in ocr_results])
+
+    # ── 优先：模板匹配判断主窗口 ──
+    # 微信 PC 版主窗口左侧侧边栏有固定图标布局，用模板匹配最可靠
+    if img is not None:
+        mainwindow_template = Path(__file__).parent.parent / "assets" / "wechat_templates" / "mainwindow.png"
+        if mainwindow_template.exists():
+            from .wechat_vision import find_template_center
+            center = find_template_center(img, str(mainwindow_template), confidence=0.6)
+            if center:
+                return "main", "微信主窗口（侧边栏匹配）"
 
     # 登录面板
     if any(kw in all_text for kw in ["二维码", "扫码登录", "扫描二维码"]):
@@ -331,8 +343,34 @@ def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]
                     sum(1 for kw in ["微信", "通讯录", "发现", "我"] if kw in all_text) >= 1
     # 底部输入框特征（主窗口也有）
     has_input_area = "发送" in all_text or "按住说话" in all_text
-    if has_main_kws or (has_chat_list and has_input_area):
+    # 朋友圈入口检测：主窗口侧边栏有朋友圈图标
+    has_moments_sidebar = "朋友圈" in all_text
+    # ── 新增：服务号推送消息特征 ──
+    # 微信 PC 版主窗口的聊天列表常含服务号推送消息，OCR 可识别到「服务号」标签 + 推送内容
+    # 这是主窗口的强特征（详情页/聊天窗口不会有「服务号」作为列表标签）
+    has_service_push = "服务号" in all_text and any(
+        kw in all_text for kw in ["关注", "条]", "欢迎", "Hi", "你好"]
+    )
+    # ── 新增：聊天列表消息计数特征 ──
+    # 如「[302条]」「[5条]」这种未读消息计数，是主窗口聊天列表的强特征
+    has_msg_count = "条]" in all_text
+    # ── 新增：时间戳特征（更宽松）──
+    # 微信聊天列表的时间戳格式：00.38、12:30、昨天、星期一等
+    import re
+    has_time_stamp = bool(re.search(r'\d{2}[.:]\d{2}', all_text)) or any(
+        kw in all_text for kw in ["昨天", "星期", "分钟前", "小时前", "刚刚"]
+    )
+    # ── 新增：多个聊天会话特征 ──
+    # 主窗口通常有多个聊天会话名/群名在 OCR 结果中
+    # 如果 OCR 结果中同时出现多个不同来源的文字（如群名+服务号推送+时间），大概率是主窗口
+    ocr_text_count = len([t for t in ocr_results if t[2] >= 0.15])
+    has_multiple_sessions = ocr_text_count >= 5 and has_time_stamp
+    
+    if has_main_kws or (has_chat_list and has_input_area) or has_moments_sidebar:
         return "main", "微信主窗口（侧边栏可见）"
+    # 新增主窗口判断：服务号推送 + 消息计数 + 多会话特征
+    if has_service_push or has_msg_count or has_multiple_sessions:
+        return "main", "微信主窗口（聊天列表可见）"
 
     # 聊天窗口（严格特征：真正的聊天窗口有服务号自动回复特征，或明确的输入提示）
     has_url = "https://" in all_text or "http://" in all_text
@@ -361,7 +399,7 @@ def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]
     # 兜底：明确有「朋友圈」标题 + 封面/相册
     if "朋友圈" in all_text and any(kw in all_text for kw in ["封面", "相册", "拍一拍"]):
         return "moments", "朋友圈"
-
+    
     # 发现页（左侧导航含 "朋友圈" "视频号" "看一看" 等）
     discovery_kws = ["朋友圈", "视频号", "看一看", "搜一搜", "小程序"]
     has_discovery = sum(1 for kw in discovery_kws if kw in all_text) >= 3
@@ -402,7 +440,7 @@ def _observe() -> str:
     ocr_results = _ocr_image(img)
 
     # 页面分类
-    page_type, page_desc = _classify_page(ocr_results, img_w, img_h)
+    page_type, page_desc = _classify_page(ocr_results, img_w, img_h, img=img)
 
     # 收集可见文字（精选关键文字，去重、按置信度排序）
     # 只保留中高置信度文字，避免噪声项淹没 LLM
@@ -466,7 +504,12 @@ def _observe() -> str:
     if page_type == "login":
         lines.append("【判断】需要先登录。")
     elif page_type == "main":
-        lines.append("【判断】在微信主窗口。左侧是聊天列表，右侧是聊天内容。点击左侧侧边栏的「朋友圈」图标（相机/光圈样式）可进入朋友圈。")
+        lines.append("【判断】在微信主窗口。左侧是聊天列表，右侧是聊天内容。")
+        # 检测是否在朋友圈页面（主窗口侧边栏有朋友圈入口）
+        if "朋友圈" in all_text_joined:
+            lines.append("【导航】侧边栏检测到「朋友圈」入口，可直接点击 wechat_click_text('朋友圈') 进入朋友圈。")
+        else:
+            lines.append("【导航】点击左侧侧边栏的「朋友圈」图标（相机/光圈样式）可进入朋友圈。如果 OCR 未识别到，尝试 wechat_click_text('朋友圈图标') 使用模板匹配。")
     elif page_type == "search_results":
         has_service = any(kw in " ".join(visible_texts) for kw in ["服务号", "火眼"])
         if has_service:
@@ -493,7 +536,7 @@ def _observe() -> str:
         elif has_msg_btn:
             lines.append("【判断】可以点击「私信」发送消息。")
         else:
-            lines.append("【判断】在详情页，请根据绿en按钮决定操作。")
+            lines.append("【判断】在详情页，请根据绿色按钮决定操作。")
     elif page_type == "chat":
         lines.append("【判断】已在聊天窗口，可以直接发送消息。")
     elif page_type == "discovery":
@@ -1265,6 +1308,26 @@ def wechat_click_text(target: str, n: int = 1) -> str:
     # 微信 PC 版侧边栏的「朋友圈」是纯图标（相机/光圈样式），没有文字标签
     # 先尝试模板匹配，比 OCR 更可靠
     if target in ("朋友圈", "朋友圈图标"):
+        # 策略1: 先尝试 OCR 找「朋友圈」文字（有些版本有文字标签）
+        for text, bbox, conf in ocr_results:
+            t = text.strip()
+            if conf < 0.15:
+                continue
+            if "朋友圈" in t:
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                cx = int(sum(xs) / len(xs))
+                cy = int(sum(ys) / len(ys))
+                print(f"[AGENT] click_text: OCR 定位「朋友圈」文字 → ({cx},{cy})")
+                sx, sy = _window_client_to_screen(hwnd, cx, cy)
+                pyautogui.moveTo(sx, sy, duration=0.1)
+                pyautogui.click(sx, sy)
+                time.sleep(2.0)
+                _refresh_hwnd()
+                _clear_retry(f"click_text:{target}:{n}")
+                return f"✅ 已点击「朋友圈」文字({cx},{cy})\n\n{_observe()}"
+        
+        # 策略2: 模板匹配朋友圈图标
         template_path = Path(__file__).parent.parent / "assets" / "wechat_templates" / "friendcircle.png"
         if template_path.exists():
             from .wechat_vision import find_template_center
