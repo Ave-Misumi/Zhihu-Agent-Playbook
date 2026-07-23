@@ -1,6 +1,6 @@
 """Zhihu-Agent-Playbook 主入口
 
-知乎链路使用 browser-use Agent；WPS / 微信链路使用 LangChain ReAct Agent。
+浏览器链路使用 browser-use Agent；WPS / 微信链路使用 LangChain ReAct Agent。
 
 用法:
     python main.py                                                 # 知乎默认任务
@@ -35,12 +35,12 @@ def _route_intent(user_task: str) -> str:
         return "wechat"
     if any(kw in user_task for kw in WPS_KEYWORDS):
         return "wps"
-    return "zhihu"
+    return "browser"
 
 
-async def run_zhihu(user_task: str):
-    from agent.core import create_zhihu_agent
-    agent = await create_zhihu_agent(user_task)
+async def run_browser(user_task: str):
+    from agent.core import create_browser_agent
+    agent = await create_browser_agent(user_task)
     history = await agent.run()
     
     # Token 使用统计
@@ -154,7 +154,7 @@ async def main():
             "帮我登录知乎，写一篇关于2026年AI Agent发展趋势的文章（配图），"
             "发布后在知乎首页搜索并找到这篇文章，给文章评论+收藏。注意不要给自己点赞。"
         )
-        await run_zhihu(user_task)
+        await run_browser(user_task)
         return
 
     user_task = " ".join(args)
@@ -165,7 +165,7 @@ async def main():
     elif route == "wps":
         await run_wps(user_task)
     else:
-        await run_zhihu(user_task)
+        await run_browser(user_task)
 
 
 if __name__ == "__main__":

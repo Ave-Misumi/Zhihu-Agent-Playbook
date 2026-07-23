@@ -9,7 +9,7 @@ import json_repair
 from browser_use.llm.views import ChatInvokeCompletion, ChatInvokeUsage
 
 # 当前 agent 模式（由 agent/core.py 设置，_sanitize_actions 据此过滤无关工具）
-_CURRENT_AGENT_MODE = "zhihu"  # "zhihu" | "wps" | "wechat"
+_CURRENT_AGENT_MODE = "browser"  # "browser" | "wps" | "wechat"
 def set_agent_mode(mode: str):
     global _CURRENT_AGENT_MODE
     _CURRENT_AGENT_MODE = mode
@@ -935,17 +935,17 @@ class BridgeLLM:
             # 10c) 模式感知过滤：移除非当前 agent 的工具
             #   WPS mode → 只保留 wps_* / get_wps_*
             #   wechat mode → 只保留 wechat_*
-            #   zhihu mode → 移除 wps_* / wechat_*
-            ZHIHU_ONLY_KEYS = {"zhihu_body_input", "zhihu_body_input_with_image", "generate_and_paste_image", "ask_human_for_intervention"}
+            #   browser mode → 移除 wps_* / wechat_*
+            BROWSER_ONLY_KEYS = {"zhihu_body_input", "zhihu_body_input_with_image", "generate_and_paste_image", "ask_human_for_intervention"}
             WPS_ONLY_KEYS = {"wps_create_document_and_export_pdf", "get_wps_template"}
             WECHAT_ONLY_KEYS = {"wechat_search_and_follow", "wechat_send_message"}
             if _CURRENT_AGENT_MODE == "wps":
-                for k in ZHIHU_ONLY_KEYS | WECHAT_ONLY_KEYS:
+                for k in BROWSER_ONLY_KEYS | WECHAT_ONLY_KEYS:
                     if k in act:
                         act.pop(k)
                         print(f"[WARN] Mode=wps, removed {k} (not registered)")
             elif _CURRENT_AGENT_MODE == "wechat":
-                for k in ZHIHU_ONLY_KEYS | WPS_ONLY_KEYS:
+                for k in BROWSER_ONLY_KEYS | WPS_ONLY_KEYS:
                     if k in act:
                         act.pop(k)
                         print(f"[WARN] Mode=wechat, removed {k} (not registered)")

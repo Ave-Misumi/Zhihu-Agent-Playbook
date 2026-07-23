@@ -1,6 +1,6 @@
 """
 Agent 工厂:
-- 知乎链路:browser-use Agent(浏览器自动化)
+- 浏览器链路:browser-use Agent(浏览器自动化,通用浏览器任务)
 - WPS / 微信链路:LangChain ReAct Agent(纯工具调用,无需浏览器)
 """
 import os
@@ -37,7 +37,9 @@ from tools.wechat_agent import (
 # 知乎 Agent 知识库(保持 browser-use)
 # ═══════════════════════════════════════════════════════════
 
-ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏览器基础操作完成知乎上的各种任务。
+BROWSER_SYSTEM_PROMPT = """你是一个浏览器自动化助手,可以用浏览器基础操作完成各种网页任务。
+
+## 当前平台: 知乎
 
 ## 可用能力
 - click / input / navigate / scroll / wait / evaluate:浏览器基础操作
@@ -309,8 +311,8 @@ def _make_browser_profile(headless: bool = False) -> BrowserProfile:
     )
 
 
-def create_zhihu_tools() -> Tools:
-    """知乎链路:纯LLM决策 + 编辑器专用工具"""
+def create_browser_tools() -> Tools:
+    """浏览器链路:纯LLM决策 + 编辑器专用工具"""
     tools = Tools()
     tools.registry.action(
         description="向知乎正文编辑器输入HTML文章内容并自动生成配图。传入html_content='<p>段落1</p><p>段落2</p>...'和article_topic='文章标题'。返回OK:N|IMG:M(正文+配图都成功)或OK:N|IMG_FAIL:...(正文成功配图失败)。正文和配图就靠这个工具写！不要用evaluate自己写JS！"
@@ -333,21 +335,21 @@ def create_zhihu_tools() -> Tools:
     return tools
 
 
-async def create_zhihu_agent(task: str) -> Agent:
-    """知乎链路:纯LLM决策模式
+async def create_browser_agent(task: str) -> Agent:
+    """浏览器链路:纯LLM决策模式
     
-    只提供浏览器基础操作 + 通用工具,所有决策由LLM自行完成。
+    提供浏览器基础操作 + 通用工具,所有决策由LLM自行完成。
     应用 Playbook Interception Layer 1+2:
       L1: 执行层拦截 click(index) → 自动查 playbook 用 CSS selector 直接点击
-      L2: 规则引擎自动关闭创作助手弹窗,节省 LLM 步骤
+      L2: 规则引擎自动关闭弹窗,节省 LLM 步骤
     """
-    set_agent_mode("zhihu")
+    set_agent_mode("browser")
     agent = Agent(
         task=task,
         llm=get_llm(),
         browser_session=BrowserSession(browser_profile=_make_browser_profile(headless=False)),
-        tools=create_zhihu_tools(),
-        extend_system_message=ZHIHU_SYSTEM_PROMPT,
+        tools=create_browser_tools(),
+        extend_system_message=BROWSER_SYSTEM_PROMPT,
         max_steps=40,
         llm_timeout=180,
         use_vision=False,
