@@ -254,8 +254,8 @@ def _find_detail_window(old_hwnd: int = 0, timeout: int = 3) -> int | None:
             user32.GetWindowTextW(hwnd, title_buf, 256)
             title = title_buf.value
             cls = cls_buf.value
-            # 匹配：标题含「服务号」或 class 是 WeChatMainWndForPC
-            if "服务号" in title or "公众号" in title or cls == "WeChatMainWndForPC":
+            # 匹配：标题含「服务号」「公众号」「朋友圈」或 class 是 WeChatMainWndForPC
+            if any(kw in title for kw in ("服务号", "公众号", "朋友圈", "Moments")) or cls == "WeChatMainWndForPC":
                 found.append((hwnd, ww * hh))
             return True
 
@@ -314,26 +314,59 @@ def _classify_page(ocr_results: list, img_w: int, img_h: int) -> tuple[str, str]
         return "search_results", "搜索结果"
 
     # 服务号/公众号详情页
+    # 严格特征：必须有详情页专属 tab（全部/贴图/文章/视频号/服务 中至少2个）
+    # 或者同时满足：有「已关注」+「私信/发消息」按钮（不是聊天消息里的文字）
     detail_tabs = ["全部", "贴图", "文章", "视频号", "服务"]
     has_detail_tabs = sum(1 for kw in detail_tabs if kw in all_text) >= 2
-    if has_detail_tabs or ("服务号" in all_text and any(kw in all_text for kw in ["关注", "已关注", "私信", "发消息"])):
+    has_followed_and_msg = "已关注" in all_text and any(kw in all_text for kw in ["私信", "发消息"])
+    if has_detail_tabs or has_followed_and_msg:
         return "detail", "服务号/公众号详情页"
 
-    # 聊天窗口
+    # 主窗口（优先判断！聊天窗口的特征主窗口也可能有）
+    # 特征：左侧聊天列表 + 右侧聊天内容
+    main_kws = ["微信", "通讯录", "聊天", "消息"]
+    has_main_kws = sum(1 for kw in main_kws if kw in all_text) >= 3
+    # 聊天列表特征：有多个联系人/群聊名称 + 时间戳 + 消息预览
+    has_chat_list = any(kw in all_text for kw in ["昨天", "星期", "分钟前"]) and \
+                    sum(1 for kw in ["微信", "通讯录", "发现", "我"] if kw in all_text) >= 1
+    # 底部输入框特征（主窗口也有）
+    has_input_area = "发送" in all_text or "按住说话" in all_text
+    if has_main_kws or (has_chat_list and has_input_area):
+        return "main", "微信主窗口（侧边栏可见）"
+
+    # 聊天窗口（严格特征：真正的聊天窗口有服务号自动回复特征，或明确的输入提示）
     has_url = "https://" in all_text or "http://" in all_text
     has_service_chat = any(kw in all_text for kw in ["Hi", "等你很久了", "联系", "介绍", "大家都在搜"])
     # 服务号自动回复链接 → 优先判为聊天
     if has_service_chat and has_url:
         return "chat", "聊天窗口（含自动回复链接）"
-    chat_bottom = ["发送", "按住说话", "可以描述", "产品介绍", "操作视频", "功能"]
-    chat_count = sum(1 for kw in chat_bottom if kw in all_text)
-    if chat_count >= 2 or (has_service_chat and chat_count >= 1):
+    # 严格聊天特征：有「按住说话」或明确的输入提示 + 服务号特征
+    chat_strict = ["按住说话", "可以描述", "描述任务", "输入"]
+    has_chat_strict = sum(1 for kw in chat_strict if kw in all_text) >= 1
+    if has_service_chat and has_chat_strict:
         return "chat", "聊天窗口"
 
-    # 主窗口
-    main_kws = ["微信", "通讯录", "聊天", "消息"]
-    if sum(1 for kw in main_kws if kw in all_text) >= 3:
-        return "main", "微信主窗口"
+    # 朋友圈/Moments 页面
+    # 特征1: 有朋友圈内容（点赞、评论、时间等），且没有「发送」按钮（主窗口才有）
+    moments_content = ["点赞", "评论", "封面", "相册", "昨天", "分钟前", "小时前", "刚刚", "天前"]
+    has_moments_content = sum(1 for kw in moments_content if kw in all_text) >= 2
+    # 朋友圈窗口通常没有底部输入框的「发送」按钮
+    no_chat_input = "发送" not in all_text
+    if has_moments_content and no_chat_input:
+        return "moments", "朋友圈"
+    # 特征2: 明确有「朋友圈」标题 + 时间词（朋友圈动态必有时间戳）
+    has_time = any(kw in all_text for kw in ["分钟前", "小时前", "昨天", "天前", "刚刚"])
+    if "朋友圈" in all_text and has_time and no_chat_input:
+        return "moments", "朋友圈"
+    # 兜底：明确有「朋友圈」标题 + 封面/相册
+    if "朋友圈" in all_text and any(kw in all_text for kw in ["封面", "相册", "拍一拍"]):
+        return "moments", "朋友圈"
+
+    # 发现页（左侧导航含 "朋友圈" "视频号" "看一看" 等）
+    discovery_kws = ["朋友圈", "视频号", "看一看", "搜一搜", "小程序"]
+    has_discovery = sum(1 for kw in discovery_kws if kw in all_text) >= 3
+    if has_discovery and "发现" in all_text:
+        return "discovery", "发现页"
 
     return "unknown", "未知页面"
 
@@ -433,7 +466,7 @@ def _observe() -> str:
     if page_type == "login":
         lines.append("【判断】需要先登录。")
     elif page_type == "main":
-        lines.append("【判断】在主窗口，可以执行搜索。")
+        lines.append("【判断】在微信主窗口。左侧是聊天列表，右侧是聊天内容。点击左侧侧边栏的「朋友圈」图标（相机/光圈样式）可进入朋友圈。")
     elif page_type == "search_results":
         has_service = any(kw in " ".join(visible_texts) for kw in ["服务号", "火眼"])
         if has_service:
@@ -463,6 +496,11 @@ def _observe() -> str:
             lines.append("【判断】在详情页，请根据绿en按钮决定操作。")
     elif page_type == "chat":
         lines.append("【判断】已在聊天窗口，可以直接发送消息。")
+    elif page_type == "discovery":
+        lines.append("【判断】在发现页，可以点击「朋友圈」进入。（注：微信 PC 版主窗口侧边栏通常直接有「朋友圈」，无需经过发现页）")
+    elif page_type == "moments":
+        has_like = any(kw in " ".join(visible_texts) for kw in ["赞", "评论", "...", "⋯"])
+        lines.append("【判断】在朋友圈。每条动态右下角有「两个点」按钮（⋯），点击后弹出「点赞」和「评论」选项。要点赞请先点击「两个点」按钮，再点击「点赞」。（注意：不要滚动，第一条动态就在顶部）")
     else:
         lines.append("【判断】未知页面，请根据可见文字判断当前状态。")
 
@@ -692,11 +730,67 @@ def wechat_click_button(target: str) -> str:
 
     # ── 返回 ──
     if target == "返回":
+        # 策略1: OCR 找左上角的返回箭头（「←」「<」「返回」「‹」等）
+        # 微信详情页的返回按钮通常在左上角 15% 宽度 × 15% 高度区域
+        roi_top_left = img[:int(img_h * 0.2), :int(img_w * 0.25)]
+        back_hit = None
+        for back_text in ("<", "←", "‹", "返回"):
+            back_hit = find_text_center(roi_top_left, back_text, confidence=0.2)
+            if back_hit:
+                break
+        if back_hit is None:
+            # 策略2: 固定坐标 —— 微信返回箭头通常在左上角 (35, 35) 附近
+            # 但不同版本/分辨率有差异，尝试多个候选位置
+            back_candidates = [
+                (int(img_w * 0.03), int(img_h * 0.04)),   # 左上角 3%, 4%
+                (int(img_w * 0.05), int(img_h * 0.06)),   # 5%, 6%
+                (35, 35),                                  # 绝对坐标（小窗口）
+                (50, 40),                                  # 稍偏右
+            ]
+            print(f"[AGENT] 返回: OCR 未找到箭头，尝试 {len(back_candidates)} 个候选位置")
+        else:
+            print(f"[AGENT] 返回: OCR 定位到返回箭头 {back_hit}")
+            back_candidates = [back_hit]
+
+        # 逐个尝试候选位置，验证是否真正返回了
+        for i, (cx, cy) in enumerate(back_candidates):
+            sx, sy = _window_client_to_screen(hwnd, cx, cy)
+            pyautogui.moveTo(sx, sy, duration=0.1)
+            pyautogui.click(sx, sy)
+            time.sleep(1.0)
+            _refresh_hwnd()
+            obs = _observe()
+            # 验证：如果页面不再是详情页（没有详情页特征），说明返回成功
+            is_detail = ("已关注" in obs or "关注" in obs) and ("私信" in obs or "发消息" in obs or "取消关注" in obs)
+            is_main = "微信" in obs and ("通讯录" in obs or "聊天" in obs)
+            if not is_detail or is_main:
+                print(f"[AGENT] 返回成功！候选位置 {i+1}/{len(back_candidates)}: ({cx},{cy})")
+                _clear_retry("click_button:返回")
+                return f"✅ 已返回（位置 {i+1}）\n\n{obs}"
+            print(f"[AGENT] 返回失败，候选位置 {i+1}/{len(back_candidates)}: ({cx},{cy})，页面仍是详情页")
+
+        # 所有候选位置都失败 → 尝试 Esc
+        print("[AGENT] 所有候选位置都失败，尝试 Esc...")
         pyautogui.press('escape')
         time.sleep(0.5)
         _refresh_hwnd()
+        obs = _observe()
+        is_detail = ("已关注" in obs or "关注" in obs) and ("私信" in obs or "发消息" in obs or "取消关注" in obs)
+        if not is_detail:
+            _clear_retry("click_button:返回")
+            return f"✅ 已返回（Esc）\n\n{obs}"
+
+        # 还是失败 → 尝试 Alt+Left（浏览器式返回）
+        print("[AGENT] Esc 也失败，尝试 Alt+Left...")
+        pyautogui.keyDown('alt')
+        pyautogui.keyDown('left')
+        pyautogui.keyUp('left')
+        pyautogui.keyUp('alt')
+        time.sleep(0.5)
+        _refresh_hwnd()
+        obs = _observe()
         _clear_retry("click_button:返回")
-        return f"✅ 已返回\n\n{_observe()}"
+        return f"⚠️ 已尝试多种方式返回\n\n{obs}"
 
     # ── 关注按钮（绿色）──
     if target == "关注":
@@ -1129,6 +1223,339 @@ def wechat_type_and_send(message: str) -> str:
 
 
 # ═══════════════════════════════════════════
+# 原子操作：通用点击 + 滚动（LLM 决策，不做多步封装）
+# ═══════════════════════════════════════════
+
+def wechat_click_text(target: str, n: int = 1) -> str:
+    """在当前窗口中找到第 n 个匹配文字的 OCR 区域并点击。
+
+    原子操作：只做「截图→OCR→定位→点击」一步，不做多步导航。
+    适用场景：点击导航栏、按钮、菜单项、任何 OCR 能识别到的文字。
+    点击后自动调用 wechat_observe 返回新页面状态，LLM 据此决策下一步。
+
+    Args:
+        target: 要点击的文字，如 "发现" "朋友圈" "赞" "..." "评论" "取消关注"
+        n: 匹配第 n 个出现的文字（1-indexed，从上到下、从左到右排序）。默认 1。
+
+    Returns:
+        操作结果 + 点击后的窗口状态（自动附带 wechat_observe 结果）
+    """
+    hwnd = _get_hwnd()
+    if hwnd is None:
+        return "❌ 微信未启动或未登录"
+
+    if not _bump_retry(f"click_text:{target}:{n}"):
+        return (
+            f"❌ [FATAL] 点击「{target}」已重试 3 次仍未成功\n"
+            f"【建议】放弃此操作，汇报当前状态给用户。"
+        )
+
+    _ensure_foreground(hwnd)
+    time.sleep(0.3)
+
+    img = capture_window(hwnd, client_only=True)
+    if img is None:
+        return "❌ 截图失败"
+    img_h, img_w = img.shape[:2]
+    ocr_results = _ocr_image(img)
+
+    from .wechat import _window_client_to_screen
+
+    # ── 优先：朋友圈图标模板匹配 ──
+    # 微信 PC 版侧边栏的「朋友圈」是纯图标（相机/光圈样式），没有文字标签
+    # 先尝试模板匹配，比 OCR 更可靠
+    if target in ("朋友圈", "朋友圈图标"):
+        template_path = Path(__file__).parent.parent / "assets" / "wechat_templates" / "friendcircle.png"
+        if template_path.exists():
+            from .wechat_vision import find_template_center
+            center = find_template_center(img, str(template_path), confidence=0.65)
+            if center:
+                cx, cy = center
+                print(f"[AGENT] click_text: 模板匹配「朋友圈」图标 → ({cx},{cy})")
+                sx, sy = _window_client_to_screen(hwnd, cx, cy)
+                pyautogui.moveTo(sx, sy, duration=0.1)
+                pyautogui.click(sx, sy)
+                time.sleep(2.0)  # 朋友圈窗口弹出需要更久
+                _refresh_hwnd()  # 检测并切换到新窗口
+                _clear_retry(f"click_text:{target}:{n}")
+                return f"✅ 已点击「朋友圈」图标({cx},{cy})\n\n{_observe()}"
+            else:
+                print(f"[AGENT] 朋友圈图标模板匹配失败 (confidence<0.65)，回退到 OCR")
+        else:
+            print(f"[AGENT] 朋友圈图标模板不存在: {template_path}，回退到 OCR")
+
+    # 收集所有匹配文字的区域，按 (y, x) 排序（从上到下，从左到右）
+    candidates = []
+    for text, bbox, conf in ocr_results:
+        t = text.strip()
+        if conf < 0.15:
+            continue
+        if target in t:
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            cx = int(sum(xs) / len(xs))
+            cy = int(sum(ys) / len(ys))
+            candidates.append((cy, cx, conf, t))
+
+    if not candidates:
+        ocr_list = [t[0] for t in ocr_results if t[2] >= 0.15]
+        return (
+            f"❌ 未找到文字「{target}」\n"
+            f"【OCR 文字({len(ocr_list)}条)】{', '.join(ocr_list[:20])}\n"
+            f"【建议】检查 target 是否有误，或用「(部分匹配)」搜索。"
+        )
+
+    candidates.sort(key=lambda c: (c[0], c[1]))  # 按 y, x 排序
+
+    if n > len(candidates):
+        return (
+            f"⚠️ 找到 {len(candidates)} 处「{target}」，但请求第 {n} 处\n"
+            f"【候选列表】(y, x): {[(c[0], c[1]) for c in candidates[:10]]}\n"
+            f"【建议】减小 n 值（当前 n={n} > 总数 {len(candidates)}）。"
+        )
+
+    cy, cx, conf, matched = candidates[n - 1]
+    print(f"[AGENT] click_text: 第{n}处「{target}」→ OCR=\"{matched}\" conf={conf:.2f} client=({cx},{cy})")
+
+    sx, sy = _window_client_to_screen(hwnd, cx, cy)
+    pyautogui.moveTo(sx, sy, duration=0.1)
+    pyautogui.click(sx, sy)
+    time.sleep(1.0)
+
+    _clear_retry(f"click_text:{target}:{n}")
+    return f"✅ 已点击第{n}处「{matched}」({cx},{cy})\n\n{_observe()}"
+
+
+def wechat_scroll(direction: str = "down", amount: int = 1) -> str:
+    """在当前窗口中滚动。
+
+    原子操作：只在当前位置滚动鼠标滚轮，不做多步判断。
+    滚动后自动调用 wechat_observe 返回新页面状态，LLM 据此决策。
+
+    Args:
+        direction: 滚动方向 "up"（向上/向底部）或 "down"（向下/向顶部）。默认 "down"。
+        amount: 滚轮刻度数（正值，每刻度约 120px 等效）。默认 1。
+
+    Returns:
+        操作结果 + 滚动后的窗口状态
+    """
+    hwnd = _get_hwnd()
+    if hwnd is None:
+        return "❌ 微信未启动或未登录"
+
+    _ensure_foreground(hwnd)
+    time.sleep(0.2)
+
+    img = capture_window(hwnd, client_only=True)
+    if img is None:
+        return "❌ 截图失败"
+    img_h, img_w = img.shape[:2]
+
+    # 在内容区域中央滚动
+    from .wechat import _window_client_to_screen
+    cx = int(img_w * 0.55)
+    cy = int(img_h * 0.5)
+    sx, sy = _window_client_to_screen(hwnd, cx, cy)
+
+    pyautogui.moveTo(sx, sy, duration=0.05)
+    clicks = amount * 600  # 每单位 ~600px 滚动量
+    if direction == "up":
+        clicks = -clicks  # 正值=向上滚
+    else:
+        clicks = -clicks  # 负值=向下滚
+    pyautogui.scroll(clicks)
+    time.sleep(0.5)
+
+    print(f"[AGENT] scroll: direction={direction}, amount={amount}")
+    return f"✅ 已向{('上' if direction == 'up' else '下')}滚动 {amount} 次\n\n{_observe()}"
+
+
+def wechat_like_moments_post(n: int = 1) -> str:
+    """给朋友圈第 n 条动态点赞。
+
+    操作流程：
+    1. 找到第 n 条动态右下角的「两个点」按钮（⋯ 或更多选项）
+    2. 点击「两个点」按钮，弹出菜单
+    3. 点击菜单中的「赞」按钮
+
+    Args:
+        n: 给第 n 条动态点赞（1-indexed，从上到下）。默认 1（第一条）。
+
+    Returns:
+        操作结果 + 点赞后的页面状态
+    """
+    hwnd = _get_hwnd()
+    if hwnd is None:
+        return "❌ 微信未启动或未登录"
+
+    if not _bump_retry(f"like_moments:{n}"):
+        return "❌ [FATAL] 点赞已重试 3 次仍未成功"
+
+    _ensure_foreground(hwnd)
+    time.sleep(0.3)
+
+    img = capture_window(hwnd, client_only=True)
+    if img is None:
+        return "❌ 截图失败"
+    img_h, img_w = img.shape[:2]
+
+    from .wechat import _window_client_to_screen
+
+    # ── Step 0: 先向下滚动一小段，确保第一条动态完整显示（时间戳和按钮可见）──
+    cx = int(img_w * 0.5)
+    cy = int(img_h * 0.5)
+    sx, sy = _window_client_to_screen(hwnd, cx, cy)
+    pyautogui.moveTo(sx, sy, duration=0.05)
+    pyautogui.scroll(-300)  # 向下滚动 300px，让第一条动态底部露出
+    time.sleep(0.5)
+
+    # 重新截图
+    img = capture_window(hwnd, client_only=True)
+    if img is None:
+        return "❌ 滚动后截图失败"
+    img_h, img_w = img.shape[:2]
+
+    # ── Step 1: 找第 n 条动态 ──
+    # 朋友圈动态之间有时间戳分隔，用时间词定位每条动态
+    ocr_results = _ocr_image(img)
+    time_keywords = ["分钟前", "小时前", "昨天", "天前", "刚刚"]
+
+    # 收集所有时间戳的位置（y 坐标），按 y 排序
+    post_positions = []
+    debug_times = []
+    for text, bbox, conf in ocr_results:
+        if conf < 0.1:  # 放宽置信度阈值
+            continue
+        for kw in time_keywords:
+            if kw in text:
+                ys = [p[1] for p in bbox]
+                cy = int(sum(ys) / len(ys))
+                post_positions.append(cy)
+                debug_times.append((text, conf, cy))
+                break
+
+    print(f"[AGENT] like_moments: OCR 识别到的时间戳: {debug_times}")
+    post_positions = sorted(set(post_positions))
+
+    if not post_positions:
+        # 兜底：如果没有时间戳，假设第一条动态在页面中上部
+        print(f"[AGENT] like_moments: 未识别到时间戳，使用默认位置")
+        post_positions = [int(img_h * 0.4)]
+
+    if n > len(post_positions):
+        return f"⚠️ 只找到 {len(post_positions)} 条动态，无法点赞第 {n} 条"
+
+    target_y = post_positions[n - 1]
+    print(f"[AGENT] like_moments: 第{n}条动态在时间戳 y={target_y}")
+
+    # ── Step 2: 在该动态区域找「两个点」按钮 ──
+    # 「两个点」按钮是灰色小圆点图标，位于时间戳右侧固定位置
+    # 用颜色检测找灰色圆点区域（BGR 格式）
+    dot_y_min = max(0, target_y - 30)
+    dot_y_max = min(img_h, target_y + 80)
+    dot_x_min = int(img_w * 0.75)  # 右侧 75% 区域
+    dot_roi = img[dot_y_min:dot_y_max, dot_x_min:img_w]
+
+    dot_hit = None
+
+    if dot_roi.size > 0:
+        # 模板匹配找「两个点」按钮
+        template_path = Path(__file__).parent.parent / "assets" / "wechat_templates" / "like_front.png"
+        if template_path.exists():
+            from .wechat_vision import find_template_center
+            import cv2
+            # 方法1：直接模板匹配（低阈值）
+            center = find_template_center(dot_roi, str(template_path), confidence=0.4)
+            if center:
+                cx, cy = center
+                dot_cx = dot_x_min + cx
+                dot_cy = dot_y_min + cy
+                dot_hit = (dot_cx, dot_cy)
+                print(f"[AGENT] like_moments: 模板匹配找到按钮 at ({dot_cx},{dot_cy})")
+            else:
+                # 方法2：多尺度模板匹配（支持不同大小的按钮）
+                tpl = cv2.imread(str(template_path), cv2.IMREAD_COLOR)
+                roi = dot_roi
+                if tpl is not None and roi.size > 0:
+                    best_score = 0
+                    best_loc = None
+                    best_scale = 1.0
+                    # 尝试 0.5x 到 2.0x 的缩放
+                    for scale in [0.5, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.5, 2.0]:
+                        new_w = int(tpl.shape[1] * scale)
+                        new_h = int(tpl.shape[0] * scale)
+                        if new_w < 10 or new_h < 10:
+                            continue
+                        if new_w > roi.shape[1] or new_h > roi.shape[0]:
+                            continue
+                        resized = cv2.resize(tpl, (new_w, new_h))
+                        res = cv2.matchTemplate(roi, resized, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                        if max_val > best_score:
+                            best_score = max_val
+                            best_loc = max_loc
+                            best_scale = scale
+                    
+                    if best_score >= 0.3:
+                        th, tw = int(tpl.shape[0] * best_scale), int(tpl.shape[1] * best_scale)
+                        dot_cx = dot_x_min + best_loc[0] + tw // 2
+                        dot_cy = dot_y_min + best_loc[1] + th // 2
+                        dot_hit = (dot_cx, dot_cy)
+                        print(f"[AGENT] like_moments: 多尺度匹配找到按钮 at ({dot_cx},{dot_cy}) (score={best_score:.2f}, scale={best_scale})")
+                    else:
+                        print(f"[AGENT] like_moments: 多尺度匹配未找到 (best_score={best_score:.2f})")
+                else:
+                    print(f"[AGENT] like_moments: 无法读取模板")
+        else:
+            print(f"[AGENT] like_moments: 模板文件不存在: {template_path}")
+
+    if dot_hit is None:
+        return "❌ 未找到「两个点」按钮（模板匹配失败）"
+
+    # ── Step 3: 点击「两个点」按钮 ──
+    sx, sy = _window_client_to_screen(hwnd, dot_hit[0], dot_hit[1])
+    pyautogui.moveTo(sx, sy, duration=0.1)
+    pyautogui.click(sx, sy)
+    time.sleep(0.8)
+
+    # ── Step 4: 点击弹出的「赞」按钮 ──
+    img2 = capture_window(hwnd, client_only=True)
+    if img2 is None:
+        return "❌ 点击后截图失败"
+
+    # 在按钮附近区域找「赞」——菜单在「两个点」按钮左侧弹出
+    # 搜索区域：「两个点」按钮左侧 120px，同一高度附近
+    like_roi = img2[max(0, dot_hit[1] - 30):min(img_h, dot_hit[1] + 50),
+                    max(0, dot_hit[0] - 150):max(0, dot_hit[0] - 10)]
+    like_ocr = _ocr_image(like_roi)
+    like_hit = None
+    for text, bbox, conf in like_ocr:
+        if conf < 0.15:
+            continue
+        if "赞" in text:
+            ys = [p[1] for p in bbox]
+            xs = [p[0] for p in bbox]
+            like_cx = max(0, dot_hit[0] - 150) + int(sum(xs) / len(xs))
+            like_cy = max(0, dot_hit[1] - 30) + int(sum(ys) / len(ys))
+            like_hit = (like_cx, like_cy)
+            print(f"[AGENT] like_moments: 找到「赞」按钮 at ({like_cx},{like_cy})")
+            break
+
+    if like_hit is None:
+        # 如果没找到「赞」，可能是已经点过赞了，或者菜单没弹出
+        _clear_retry(f"like_moments:{n}")
+        return f"⚠️ 未找到「赞」按钮（可能已点赞或菜单未弹出）\n\n{_observe()}"
+
+    sx, sy = _window_client_to_screen(hwnd, like_hit[0], like_hit[1])
+    pyautogui.moveTo(sx, sy, duration=0.1)
+    pyautogui.click(sx, sy)
+    time.sleep(0.5)
+
+    _clear_retry(f"like_moments:{n}")
+    return f"✅ 已给第{n}条朋友圈点赞\n\n{_observe()}"
+
+
+# ═══════════════════════════════════════════
 # LangChain Tool 定义
 # ═══════════════════════════════════════════
 
@@ -1142,6 +1569,9 @@ AGENT_TOOLS = [
     wechat_click_first_result,
     wechat_click_button,
     wechat_type_and_send,
+    wechat_click_text,
+    wechat_scroll,
+    wechat_like_moments_post,
 ]
 
 # ═══════════════════════════════════════════
