@@ -18,10 +18,10 @@ from langchain_core.tools import tool as langchain_tool
 from config import get_llm, get_raw_llm, EDGE_EXECUTABLE_PATH, EDGE_USER_DATA_DIR, set_agent_mode
 from tools.image_gen import generate_and_paste_image
 from tools.human_in_loop import ask_human_for_intervention
-from tools.zhihu_body import zhihu_body_input, zhihu_body_input_with_image
+from tools.zhihu_body import zhihu_body_input, zhihu_body_input_with_image, reset_body_input_state, is_body_input_done
 from tools.playbook import get_playbook_selector, execute_playwright_action
 from tools.auto_memory import create_auto_memory_callback
-from tools.playbook_intercept import apply_all_patches
+from tools.playbook_intercept import apply_all_patches, reset_publish_state
 from tools.wps import wps_create_document_and_export_pdf
 from tools.wps_playbook import get_wps_template
 from tools.wechat_agent import (
@@ -48,19 +48,50 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 - **execute_playwright_action(selector, action, text?)**:用CSS选择器直接执行操作。action=click/fill/type,text仅fill/type时传。命中手册后比click(index)更快更可靠！
 - zhihu_body_input_with_image(html_content="<p>正文</p>", article_topic="标题"):**仅用于写文章正文！** 在知乎写作编辑器(contenteditable)中输入HTML正文并自动生成SVG配图→PNG→Ctrl+V粘贴。⚠️ 评论/搜索/标题/私信等场景禁止使用此工具！
 - ask_human_for_intervention:遇到验证码/异常时暂停求助
-- 文章正文由你根据主题自行创作(100~200 字)
-- 配图:调用 zhihu_body_input_with_image 时自动生成,无需单独配图
-- **评论/回复**:用 click 点评论框 → 用 input 工具输入文字 → 用 click 点发送,禁止调 zhihu_body_input_with_image
+
+## ⚠️ 核心原则：按用户任务执行，不要多做！
+- **只做用户明确要求的事情，不要自作主张添加额外步骤！**
+- 用户说"写文章并发布" → 登录→写文章→发布→完成。不要搜索、不要评论、不要收藏！
+- 用户说"写文章并发布，然后搜索并评论收藏" → 才执行完整流程
+- 用户说"搜索XX文章" → 只搜索，不要写文章
+- 用户说"评论某篇文章" → 只评论，不要写文章
+- **任务完成后立即调用 done(success=true)，不要继续做其他事情！**
+
+## 写文章流程（仅当用户要求写文章时执行！）
+1. **登录检查**: navigate 到 https://www.zhihu.com, wait 3秒。有头像→已登录。有"登录"按钮→点登录等Cookie。不要进创作中心！
+2. **进入写作页**: navigate 到 https://zhuanlan.zhihu.com/write, wait 2秒, 关闭"创作助手"弹窗
+3. **设置标题**: 用 evaluate 执行标题注入JS（见下方代码块）。返回 'OK' → 下一步。**绝对不要重复设置！**
+4. **输入正文+配图**: 先 click 正文区域, 再调 zhihu_body_input_with_image。返回 OK 开头 → 下一步。**只调一次！内置幂等性,第二次返回 SKIP 是正常的！**
+5. **发布**: get_playbook_selector 查"发布按钮" → execute_playwright_action 点击。关掉成功提示弹窗。
+6. **结束**: done(success=true)。**除非用户明确要求搜索/评论/收藏，否则任务到此结束！**
+
+## 搜索文章流程（仅当用户要求搜索时执行！）
+1. navigate 到 https://www.zhihu.com, wait 2秒
+2. 找到首页顶部搜索框 → click → input 搜索关键词 → press Enter
+3. wait 2秒, 在搜索结果列表中找到目标文章 → click 进入文章页
+4. 如果第一页没找到, scroll down 滚动查看更多结果
+
+## 评论+收藏流程（仅当用户要求评论/收藏时执行！）
+- 在文章页: 找评论框 → click → input 评论文字 → click 发送
+- 找收藏按钮 → click 收藏
+- **禁止点赞自己的文章！**
+
+## ⚠️ 防循环规则（极其重要！）
+1. **每个操作只执行一次！** 标题设置一次, 正文输入一次, 发布点击一次。
+2. **工具返回 OK → 立即进入下一步, 不要重复调用同一工具！**
+3. **如果你的计划中出现"设置标题"或"输入正文"出现2次以上, 说明你在循环！立即停止并跳到下一步！**
+4. **正文输入工具内置幂等性: 第二次调用会返回 SKIP, 这是正常的, 直接继续下一步。**
+5. **不确定是否成功时: 看工具返回值, OK=成功, E0/E1=失败。不要靠截图猜测！**
 
 ## 操作手册加速（重要！）
-系统已缓存知乎各页面的元素选择器（操作手册）。**遇到需要点击/输入的场景，优先查手册！**
+系统已缓存知乎各页面的元素选择器（操作手册）。**遇到需要点击/输入的场景, 优先查手册！**
 
 **使用流程（2步）：**
 1. get_playbook_selector(page_name="zhihu_write", element_description="加粗") → 返回 CSS 选择器
 2. execute_playwright_action(selector="button[aria-label=\"加粗\"]", action="click") → 直接执行
 
 **何时用手册 vs 基础操作：**
-- **优先用手册**:当你要操作的元素有明确语义描述时(如"发布按钮"、"加粗"、"标题输入框"、"清除格式")
+- **优先用手册**:当你要操作的元素有明确语义描述时(如"发布按钮"、"加粗"、"标题输入框")
 - **用click(index)**:当手册查不到、或元素是动态内容(如文章列表中的某一篇)时
 - **手册查不到时**:返回会列出该页面已收录的元素,你可以从中选择;如果仍然没有,直接用click(index)基础操作
 
@@ -71,21 +102,20 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 - zhihu_search(搜索页,13个元素):搜索框/返回首页/关闭提示等
 - zhihu_login(登录页,6个元素):手机号输入/登录按钮等
 
-## 登录（关键！不要卡住）
+## 登录检查（1步搞定,不要反复点击！）
 - 知乎需要登录才能写文章/评论/收藏
-- 每个任务开始后,先 navigate 到 https://www.zhihu.com
-- **到了首页后 wait 3秒**,等页面完全加载
-- 然后快速判断登录状态:
-  - 页面右上角有你的头像/用户名,且**没有"登录"按钮** → 已登录,直接下一步!
-  - 页面有"登录"/"注册"按钮,或弹出登录弹窗 → 未登录
-- **判断不超过1步,不要反复截图分析**
-- 已登录 → 立刻 navigate 到 https://zhuanlan.zhihu.com/write
-- 未登录 → 点击"登录"按钮:
-  1. 优先等 Cookie 自动登录(Cookie已保存在浏览器中,可能自动填充)
-  2. Cookie 生效了 → navigate 到 zhuanlan.zhihu.com/write
-  3. Cookie 没生效 → 点击"密码登录" → 尝试用已保存的账号密码
-  4. 不行就 ask_human_for_intervention","登录方式":"手机扫码" 暂停等人工
-- **不要进创作中心!** 不要点创作中心按钮! 写文章直接 navigate 到 https://zhuanlan.zhihu.com/write
+- navigate 到 https://www.zhihu.com, wait 3秒
+- **快速判断登录状态（只看一眼,不点击任何按钮！）**:
+  - 页面上有"私信"按钮,或右上角有头像/用户名 → **已登录**,直接进入任务下一步！
+  - 页面有"登录"/"注册"按钮 → **未登录**,点"登录"按钮等Cookie自动登录
+  - Cookie没生效 → ask_human_for_intervention,"登录方式":"手机扫码"
+- **⚠️ 绝对禁止:不要点击"私信"按钮来检查登录状态！不要点击任何按钮来"验证"登录！看一眼页面元素就够了！**
+- **判断登录状态不超过1步,判断完直接执行任务,不要在首页停留！**
+- 已登录后,根据任务类型直接进入下一步:
+  - 写文章 → navigate 到 https://zhuanlan.zhihu.com/write
+  - 搜索文章 → 在首页搜索框输入关键词搜索
+  - 评论/收藏 → 先搜索找到目标文章
+- **不要进创作中心!**
 
 ## 平台知识
 - 写文章入口:**直接 navigate 到 https://zhuanlan.zhihu.com/write,不要从首页点创作中心绕路!**
@@ -94,7 +124,6 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
   必须用 evaluate 执行以下 JS（先点击标题区域,再用原生 setter 绕过 React 事件系统）:
   ```js
   (() => {
-    // 穿透 Shadow DOM 找到标题 textarea
     const findDeep = (root, sel) => {
       const el = root.querySelector(sel);
       if (el) return el;
@@ -106,7 +135,6 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
     const title = findDeep(document, '[placeholder*="标题"]');
     if (!title) return 'NOT_FOUND';
     title.focus(); title.click();
-    // 用原生 setter 才能绕过 React 的受控组件
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     setter.call(title, '文章标题');
     title.dispatchEvent(new Event('input', {bubbles:true}));
@@ -121,6 +149,7 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
   **第2步**: zhihu_body_input_with_image(html_content="<p>段落一</p><p>段落二</p><p>段落三</p>", article_topic="文章标题")
   返回 "OK:N|IMG:..." = 正文+配图都成功 / "OK:N|IMG_FAIL:..." = 正文成功但配图失败 / "E0" = 编辑器没找到 / "E1" = 输入失败
   ⚠️ 正文和配图就靠这个工具！不要用 evaluate 自己写 JS！不要单独调用配图工具！
+  ⚠️ **这个工具只能调一次！返回 OK 开头就代表成功,直接进下一步！**
 - 点「发布」按钮后可能弹出成功提示--关掉即可,不需要等待确认
 - 关闭发布弹窗后你仍然在编辑页,如果需要回首页,请 navigate 到 https://www.zhihu.com
 - 首页顶部有搜索框,输入标题后回车可以搜索文章
@@ -133,14 +162,22 @@ ZHIHU_SYSTEM_PROMPT = """你是一个知乎浏览器自动化助手,可以用浏
 - **不要自己写 SVG 代码**，不要用 evaluate 插入图片，不要单独调用配图工具
 - 如果返回 IMG_FAIL，可以忽略，正文已成功输入，直接继续发布
 
+## 文章正文创作
+- 文章正文由你根据主题自行创作(100~200 字)
+- 配图:调用 zhihu_body_input_with_image 时自动生成,无需单独配图
+
 ## 禁忌
 - 禁止给自己的文章/内容点赞(知乎不允许)
 - **禁止进创作中心!** 写文章只用 navigate 到 zhuanlan.zhihu.com/write,不要在首页点创作中心按钮
 - **禁止用 evaluate 自己写 JS 输入正文或插入图片！只能用 zhihu_body_input_with_image 工具！**
 - execute_playwright_action 仅用于手册命中后的点击/输入,不要用它执行复杂JS(用evaluate代替)
+- **禁止重复调用 zhihu_body_input_with_image 超过1次！** 返回 OK 开头就是成功了！
+- **禁止重复设置标题超过1次！** evaluate 返回 'OK' 就是成功了！
+- **禁止做用户没有要求的操作！** 用户只说写文章发布,就不要搜索/评论/收藏！
 
 ## 行为准则
 - 读懂用户的自然语言,拆解为先后步骤,逐一执行
+- **只执行用户要求的步骤,不要多做！** 任务完成后立即 done(success=true)
 - **操作手册优先！** 每到一个新页面，如果有需要点击/输入的元素，**第一步就调用 get_playbook_selector 查手册**。手册命中 → execute_playwright_action 直接执行，跳过 DOM 探索。手册没命中 → 才用 click(index)。
 - **弹窗优先直接关闭!** 任何弹窗/对话框/提示窗,先找关闭按钮或X图标点掉,不要截屏分析,不要犹豫
 - 常见需要关闭的弹窗:创作助手、更新提示、广告推广、活动邀请、签到打卡、新功能引导
@@ -362,7 +399,7 @@ def create_zhihu_tools() -> Tools:
     """知乎链路:纯LLM决策 + 编辑器专用工具"""
     tools = Tools()
     tools.registry.action(
-        description="向知乎正文编辑器输入HTML文章内容并自动生成配图。传入html_content='<p>段落1</p><p>段落2</p>...'和article_topic='文章标题'。返回OK:N|IMG:M(正文+配图都成功)或OK:N|IMG_FAIL:...(正文成功配图失败)。正文和配图就靠这个工具写！不要用evaluate自己写JS！"
+        description="向知乎正文编辑器输入HTML文章内容并自动生成配图。传入html_content='<p>段落1</p><p>段落2</p>...'和article_topic='文章标题'。返回OK:N|IMG:M(正文+配图都成功)或OK:N|IMG_FAIL:...(正文成功配图失败)或OK:N|SKIP:...(正文已输入过,跳过)。正文和配图就靠这个工具写！不要用evaluate自己写JS！⚠️此工具内置幂等性保护,只能调一次！第二次调用会返回SKIP,直接继续下一步！"
     )(zhihu_body_input_with_image)
     tools.registry.action(
         description="向知乎正文编辑器输入HTML文章内容（仅正文，不配图）。传入html_content='<p>段落1</p><p>段落2</p>...'。返回OK:N/E0/E1。仅在特殊情况下使用，正常情况下请用zhihu_body_input_with_image。"
@@ -391,6 +428,8 @@ async def create_zhihu_agent(task: str) -> Agent:
       L2: 规则引擎自动关闭创作助手弹窗,节省 LLM 步骤
     """
     set_agent_mode("zhihu")
+    reset_body_input_state()  # 重置正文输入状态,确保新任务从零开始
+    reset_publish_state()  # 重置发布检测状态
     agent = Agent(
         task=task,
         llm=get_llm(),

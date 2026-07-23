@@ -13,6 +13,30 @@ from browser_use.tools.service import ActionResult
 
 from tools.image_gen import generate_and_paste_image
 
+# ─── 幂等性状态追踪 ──────────────────────────────────────────
+# 防止 LLM 反复调用正文输入工具导致循环
+_body_input_done: bool = False
+_body_input_len: int = 0
+_body_input_topic: str = ""
+
+def reset_body_input_state():
+    """重置正文输入状态（新任务开始时调用）"""
+    global _body_input_done, _body_input_len, _body_input_topic
+    _body_input_done = False
+    _body_input_len = 0
+    _body_input_topic = ""
+
+def is_body_input_done() -> bool:
+    """检查正文是否已经成功输入过"""
+    return _body_input_done
+
+def _set_body_done(body_len: int, topic: str):
+    """标记正文输入完成"""
+    global _body_input_done, _body_input_len, _body_input_topic
+    _body_input_done = True
+    _body_input_len = body_len
+    _body_input_topic = topic
+
 
 def _parse_eval_result(result):
     """browser-use Page.evaluate() 总是返回字符串，需解析为 dict"""
@@ -151,6 +175,11 @@ async def zhihu_body_input_with_image(
       'E0' = 编辑器未找到
       'E1' = 所有输入方案均失败
     """
+    # 幂等性检查：如果正文已经成功输入过，直接返回上次的结果，不重复输入
+    if _body_input_done:
+        print(f"[zhihu_body] ⚠️ 正文已输入过 ({_body_input_len} 字)，跳过重复输入")
+        return ActionResult(extracted_content=f"OK:{_body_input_len}|SKIP:正文已输入，无需重复操作")
+    
     page = await browser_session.get_current_page()
     
     # ── 第1步: 输入正文 ──
@@ -192,6 +221,9 @@ async def zhihu_body_input_with_image(
     )
     
     img_text = img_result.extracted_content if img_result.extracted_content else ""
+    
+    # 标记正文已输入（无论配图是否成功，正文本身已写入）
+    _set_body_done(body_len, article_topic)
     
     # 解析配图结果
     if img_text.startswith("OK:"):

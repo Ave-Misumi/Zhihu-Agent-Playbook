@@ -120,6 +120,17 @@ _WRITE_PAGE_POPUPS = [
     ('div[class*="Modal"] button[aria-label="关闭"]', 'Modal 弹窗'),
 ]
 
+# ─── 发布成功检测 ─────────────────────────────────────────────
+# 检测发布按钮点击后出现的成功提示
+_publish_detected = False
+
+def was_publish_detected() -> bool:
+    return _publish_detected
+
+def reset_publish_state():
+    global _publish_detected
+    _publish_detected = False
+
 
 async def _try_close_popup(page, selector: str, name: str) -> bool:
     """尝试关闭一个弹窗,成功返回 True"""
@@ -163,6 +174,18 @@ def _apply_layer2(agent: Any) -> None:
                     if await _try_close_popup(page, sel, name):
                         closed_any = True
                         break  # 每步只关一个,避免死循环
+
+            # Rule 2: 检测发布成功提示（全局，不限URL）
+            global _publish_detected
+            try:
+                page_text = await page.evaluate("() => document.body.innerText.substring(0, 500)")
+                for pattern in ['发布成功', '已发布', '文章已发布', '发布完成']:
+                    if pattern in (page_text or ''):
+                        _publish_detected = True
+                        print(f"[Playbook:L2] ✓ 检测到发布成功提示: {pattern}")
+                        break
+            except Exception:
+                pass
 
             if closed_any:
                 # 弹窗已关,L2 直接执行后续,不调 LLM → 省一步
