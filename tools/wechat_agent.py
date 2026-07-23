@@ -1524,22 +1524,27 @@ def wechat_like_moments_post(n: int = 1) -> str:
         return "❌ 点击后截图失败"
 
     # 在按钮附近区域找「赞」——菜单在「两个点」按钮左侧弹出
-    # 搜索区域：「两个点」按钮左侧 120px，同一高度附近
+    # 搜索区域：「两个点」按钮左侧 250px（覆盖整个菜单），同一高度附近
     like_roi = img2[max(0, dot_hit[1] - 30):min(img_h, dot_hit[1] + 50),
-                    max(0, dot_hit[0] - 150):max(0, dot_hit[0] - 10)]
+                    max(0, dot_hit[0] - 250):max(0, dot_hit[0] - 10)]
     like_ocr = _ocr_image(like_roi)
     like_hit = None
+    debug_likes = []
     for text, bbox, conf in like_ocr:
-        if conf < 0.15:
+        if conf < 0.1:
             continue
-        if "赞" in text:
+        debug_likes.append((text, conf))
+        # OCR 可能识别为 "O 赞" 或 "赞"，用包含判断
+        if "赞" in text or "O 赞" in text:
             ys = [p[1] for p in bbox]
             xs = [p[0] for p in bbox]
-            like_cx = max(0, dot_hit[0] - 150) + int(sum(xs) / len(xs))
+            like_cx = max(0, dot_hit[0] - 250) + int(sum(xs) / len(xs))
             like_cy = max(0, dot_hit[1] - 30) + int(sum(ys) / len(ys))
             like_hit = (like_cx, like_cy)
-            print(f"[AGENT] like_moments: 找到「赞」按钮 at ({like_cx},{like_cy})")
+            print(f"[AGENT] like_moments: 找到「赞」按钮 at ({like_cx},{like_cy}) (OCR='{text}')")
             break
+
+    print(f"[AGENT] like_moments: 菜单区域OCR结果: {debug_likes}")
 
     if like_hit is None:
         # 如果没找到「赞」，可能是已经点过赞了，或者菜单没弹出
@@ -1551,8 +1556,28 @@ def wechat_like_moments_post(n: int = 1) -> str:
     pyautogui.click(sx, sy)
     time.sleep(0.5)
 
+    # ── Step 5: 验证点赞是否成功 ──
+    # 再次点击「两个点」按钮，检查菜单里是否出现「取消」字样
+    sx, sy = _window_client_to_screen(hwnd, dot_hit[0], dot_hit[1])
+    pyautogui.moveTo(sx, sy, duration=0.1)
+    pyautogui.click(sx, sy)
+    time.sleep(0.5)
+
+    img3 = capture_window(hwnd, client_only=True)
+    if img3 is not None:
+        verify_roi = img3[max(0, dot_hit[1] - 30):min(img_h, dot_hit[1] + 50),
+                         max(0, dot_hit[0] - 250):max(0, dot_hit[0] - 10)]
+        verify_ocr = _ocr_image(verify_roi)
+        has_cancel = any("取消" in text for text, _, conf in verify_ocr if conf >= 0.1)
+        if has_cancel:
+            _clear_retry(f"like_moments:{n}")
+            return f"✅ 已给第{n}条朋友圈点赞（验证：菜单显示「取消」）\n\n{_observe()}"
+        else:
+            # 菜单里没有「取消」，说明点赞可能没成功
+            print(f"[AGENT] like_moments: 验证失败，菜单里没有「取消」。OCR结果: {[(t, c) for t, _, c in verify_ocr if c >= 0.1]}")
+
     _clear_retry(f"like_moments:{n}")
-    return f"✅ 已给第{n}条朋友圈点赞\n\n{_observe()}"
+    return f"⚠️ 已尝试给第{n}条朋友圈点赞，但验证未通过（未检测到「取消」字样）\n\n{_observe()}"
 
 
 # ═══════════════════════════════════════════
